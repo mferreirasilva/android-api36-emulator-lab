@@ -1,0 +1,409 @@
+name: F2-24-164 Private OCR Preflight
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'bridge-trigger.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: f2-24-164-private-ocr-preflight
+  cancel-in-progress: false
+
+env:
+  FIXED_SOURCE_SHA: 877a233e19fef47c72730c633dfd98a862ea0088
+  PRIVATE_REPOSITORY: mferreirasilva/AppMotora
+  PRIVATE_ARTIFACT_NAME: f2-24-164-private-877a233e19fe
+  OFFER_A_SHA256: 2a2c4a7470b183dd6c6c99549fe3910fd5bdc39c89c27057d3b1ba67af468037
+  OFFER_B_SHA256: 5d973dea3251d76cb76581bd87fc793416c40d64226cb15721d9847c55a77a92
+  AVD_NAME: f2-24-164-api36
+  EMULATOR_SERIAL: emulator-5554
+  EVIDENCE_DIR: evidence
+
+jobs:
+  private-preflight:
+    name: API36 4-vCPU private APK OCR preflight
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Resolve authenticated private bundle - FAIL FAST
+        id: bridge
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.APPMOTORA_PRIVATE_ARTIFACT_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          {
+            echo "logical_cpus=$(nproc)"
+            echo "memory_kib=$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
+            echo "arch=$(uname -m)"
+          } > "$EVIDENCE_DIR/host-resources.txt"
+
+          if (( $(nproc) < 4 )); then
+            echo 'classification=FAIL_ENVIRONMENT_HOST_LT_4_VCPU' > "$EVIDENCE_DIR/result.txt"
+            exit 40
+          fi
+          if [[ -z "${PRIVATE_TOKEN:-}" ]]; then
+            echo 'classification=BLOCKED_PRIVATE_ARTIFACT_TOKEN' > "$EVIDENCE_DIR/result.txt"
+            exit 78
+          fi
+
+          PRIVATE_DIR="$RUNNER_TEMP/f2-24-164-private"
+          PRIVATE_ZIP="$RUNNER_TEMP/f2-24-164-private.zip"
+          ARTIFACTS_JSON="$RUNNER_TEMP/f2-24-164-artifacts.json"
+          rm -rf "$PRIVATE_DIR" "$PRIVATE_ZIP" "$ARTIFACTS_JSON"
+          mkdir -p "$PRIVATE_DIR"
+
+          API="https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/artifacts"
+          if ! curl --fail --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $PRIVATE_TOKEN" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$API?name=$PRIVATE_ARTIFACT_NAME&per_page=20" \
+            -o "$ARTIFACTS_JSON"; then
+            echo 'classification=BLOCKED_PRIVATE_ARTIFACT_ACCESS' > "$EVIDENCE_DIR/result.txt"
+            exit 79
+          fi
+
+          ARTIFACT_ID="$(jq -r '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].id // empty' "$ARTIFACTS_JSON")"
+          ARTIFACT_DIGEST="$(jq -r '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].digest // empty' "$ARTIFACTS_JSON")"
+          test -n "$ARTIFACT_ID" || {
+            echo 'classification=BLOCKED_PRIVATE_ARTIFACT_NOT_FOUND' > "$EVIDENCE_DIR/result.txt"
+            exit 80
+          }
+
+          if ! curl --fail --silent --show-error --location \
+            -H 'Accept: application/vnd.github+json' \
+            -H "Authorization: Bearer $PRIVATE_TOKEN" \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            "$API/$ARTIFACT_ID/zip" \
+            -o "$PRIVATE_ZIP"; then
+            echo 'classification=BLOCKED_PRIVATE_ARTIFACT_DOWNLOAD' > "$EVIDENCE_DIR/result.txt"
+            exit 81
+          fi
+
+          if [[ "$ARTIFACT_DIGEST" =~ ^sha256:([0-9a-f]{64})$ ]]; then
+            EXPECTED_ZIP_SHA="${BASH_REMATCH[1]}"
+            ACTUAL_ZIP_SHA="$(sha256sum "$PRIVATE_ZIP" | awk '{print $1}')"
+            [[ "$ACTUAL_ZIP_SHA" == "$EXPECTED_ZIP_SHA" ]] || {
+              echo 'classification=FAIL_BRIDGE_ARTIFACT_DIGEST' > "$EVIDENCE_DIR/result.txt"
+              exit 82
+            }
+          fi
+
+          unzip -q "$PRIVATE_ZIP" -d "$PRIVATE_DIR"
+          test -f "$PRIVATE_DIR/app.apk"
+          test -f "$PRIVATE_DIR/test.apk"
+          test -f "$PRIVATE_DIR/bridge.env"
+          test -f "$PRIVATE_DIR/bundle.sha256"
+          ! find "$PRIVATE_DIR" -maxdepth 1 -type f -name '*.png' -print -quit | grep -q .
+
+          set -a
+          # shellcheck disable=SC1091
+          source "$PRIVATE_DIR/bridge.env"
+          set +a
+
+          [[ "$SOURCE_SHA" == "$FIXED_SOURCE_SHA" ]]
+          [[ "$OFFER_A_SHA256" == '2a2c4a7470b183dd6c6c99549fe3910fd5bdc39c89c27057d3b1ba67af468037' ]]
+          [[ "$OFFER_B_SHA256" == '5d973dea3251d76cb76581bd87fc793416c40d64226cb15721d9847c55a77a92' ]]
+          echo "$APP_SHA256  $PRIVATE_DIR/app.apk" | sha256sum --check - >/dev/null
+          echo "$TEST_SHA256  $PRIVATE_DIR/test.apk" | sha256sum --check - >/dev/null
+
+          unzip -Z1 "$PRIVATE_DIR/test.apk" | grep -Fxq 'assets/fixtures/uber/f2_29_036_card.png'
+          unzip -Z1 "$PRIVATE_DIR/test.apk" | grep -Fxq 'assets/fixtures/uber/f2_24_116_offer_b_real_sanitized.png'
+          ACTUAL_A="$(unzip -p "$PRIVATE_DIR/test.apk" 'assets/fixtures/uber/f2_29_036_card.png' | sha256sum | awk '{print $1}')"
+          ACTUAL_B="$(unzip -p "$PRIVATE_DIR/test.apk" 'assets/fixtures/uber/f2_24_116_offer_b_real_sanitized.png' | sha256sum | awk '{print $1}')"
+          [[ "$ACTUAL_A" == "$OFFER_A_SHA256" ]]
+          [[ "$ACTUAL_B" == "$OFFER_B_SHA256" ]]
+
+          {
+            echo "private_artifact_id=$ARTIFACT_ID"
+            echo "source_sha=$SOURCE_SHA"
+            echo "app_sha256=$APP_SHA256"
+            echo "test_sha256=$TEST_SHA256"
+            echo "offer_a_sha256=$ACTUAL_A"
+            echo "offer_b_sha256=$ACTUAL_B"
+            echo 'bundle_integrity=PASS'
+          } > "$EVIDENCE_DIR/bundle-integrity.txt"
+
+          echo "PRIVATE_DIR=$PRIVATE_DIR" >> "$GITHUB_ENV"
+          echo "APP_SHA256=$APP_SHA256" >> "$GITHUB_ENV"
+          echo "TEST_SHA256=$TEST_SHA256" >> "$GITHUB_ENV"
+          echo "APP_PACKAGE=$APP_PACKAGE" >> "$GITHUB_ENV"
+          echo "TEST_PACKAGE=$TEST_PACKAGE" >> "$GITHUB_ENV"
+          echo "TEST_CLASS=$TEST_CLASS" >> "$GITHUB_ENV"
+          echo "TEST_RUNNER=$TEST_RUNNER" >> "$GITHUB_ENV"
+          echo "PRIVATE_ARTIFACT_ID=$ARTIFACT_ID" >> "$GITHUB_ENV"
+
+      - name: Prepare API36 emulator and health probe
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT"
+          test -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+          test -x "$SDK_ROOT/platform-tools/adb"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/platform-tools:$PATH"
+
+          AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+
+          if ! ldconfig -p | grep -Fq 'libpulse.so.0'; then
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends libpulse0 >/dev/null
+          fi
+          sdkmanager --install emulator 'system-images;android-36;google_apis;x86_64' >/dev/null
+          "$ANDROID_SDK_ROOT/emulator/emulator" -version > "$EVIDENCE_DIR/emulator-version.txt" 2>&1
+          "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check > "$EVIDENCE_DIR/accel-check.txt" 2>&1
+
+          cat > "$RUNNER_TEMP/f2-24-164-health.sh" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          label="${1:?checkpoint required}"
+          window="$RUNNER_TEMP/f2-24-164-window-${label}.txt"
+
+          timeout 65s adb -s "$EMULATOR_SERIAL" shell cmd package wait-for-handler --timeout 60000 >/dev/null 2>&1
+          timeout 65s adb -s "$EMULATOR_SERIAL" shell cmd package wait-for-background-handler --timeout 60000 >/dev/null 2>&1
+          timeout 15s adb -s "$EMULATOR_SERIAL" shell pm path android >/dev/null 2>&1
+          timeout 15s adb -s "$EMULATOR_SERIAL" shell dumpsys window windows > "$window" 2>&1
+
+          pid="$(timeout 10s adb -s "$EMULATOR_SERIAL" shell pidof com.android.systemui 2>/dev/null | tr -d '\r' || true)"
+          test -n "$pid"
+
+          if awk '
+            /^  Window #[0-9]+ Window\{/ {
+              if (in_anr && visible) found=1
+              in_anr = index($0, "Application Not Responding: com.android.systemui") > 0
+              visible = 0
+              next
+            }
+            in_anr && /isVisible=true/ { visible=1 }
+            END {
+              if (in_anr && visible) found=1
+              exit(found ? 0 : 1)
+            }
+          ' "$window"; then
+            printf '%s=VISIBLE_SYSTEMUI_ANR pid=%s\n' "$label" "$pid" >> "$EVIDENCE_DIR/health-checkpoints.txt"
+            rm -f "$window"
+            exit 42
+          fi
+
+          previous_pid="$(cat "$RUNNER_TEMP/f2-24-164-last-systemui-pid.txt" 2>/dev/null || true)"
+          if [[ -n "$previous_pid" && "$previous_pid" != "$pid" ]]; then
+            printf '%s=SYSTEMUI_PID_CHANGED previous=%s current=%s\n' "$label" "$previous_pid" "$pid" >> "$EVIDENCE_DIR/health-checkpoints.txt"
+            rm -f "$window"
+            exit 43
+          fi
+          printf '%s' "$pid" > "$RUNNER_TEMP/f2-24-164-last-systemui-pid.txt"
+          printf '%s=CLEAN systemui_pid=%s\n' "$label" "$pid" >> "$EVIDENCE_DIR/health-checkpoints.txt"
+          rm -f "$window"
+          BASH
+          chmod +x "$RUNNER_TEMP/f2-24-164-health.sh"
+          bash -n "$RUNNER_TEMP/f2-24-164-health.sh"
+
+      - name: Boot one CLEAN API36 4-vCPU emulator
+        id: boot
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$ANDROID_AVD_HOME/$AVD_NAME.avd" "$ANDROID_AVD_HOME/$AVD_NAME.ini"
+          echo no | avdmanager create avd --force \
+            -n "$AVD_NAME" \
+            --package 'system-images;android-36;google_apis;x86_64' \
+            --device 'pixel_6' >/dev/null
+          {
+            echo 'hw.cpu.ncore=4'
+            echo 'hw.ramSize=4096'
+            echo 'vm.heapSize=512'
+            echo 'disk.dataPartition.size=4096M'
+          } >> "$ANDROID_AVD_HOME/$AVD_NAME.avd/config.ini"
+
+          adb start-server
+          nohup "$ANDROID_SDK_ROOT/emulator/emulator" \
+            -port 5554 -avd "$AVD_NAME" -no-window -accel on \
+            -gpu swiftshader_indirect -no-snapshot -noaudio -no-metrics \
+            > "$RUNNER_TEMP/f2-24-164-emulator.log" 2>&1 &
+          echo $! > "$RUNNER_TEMP/f2-24-164-emulator.pid"
+
+          DEVICE_READY=false
+          for _ in $(seq 1 120); do
+            if adb -s "$EMULATOR_SERIAL" get-state 2>/dev/null | grep -qx device; then
+              DEVICE_READY=true
+              break
+            fi
+            sleep 2
+          done
+          [[ "$DEVICE_READY" == true ]] || {
+            echo 'classification=FAIL_ENVIRONMENT_EMULATOR_DEVICE' > "$EVIDENCE_DIR/result.txt"
+            exit 41
+          }
+
+          BOOT_READY=false
+          for _ in $(seq 1 120); do
+            BOOT="$(adb -s "$EMULATOR_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+            BOOTANIM="$(adb -s "$EMULATOR_SERIAL" shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r' || true)"
+            if [[ "$BOOT" == '1' && "$BOOTANIM" == 'stopped' ]]; then
+              BOOT_READY=true
+              break
+            fi
+            sleep 2
+          done
+          [[ "$BOOT_READY" == true ]] || {
+            echo 'classification=FAIL_ENVIRONMENT_EMULATOR_BOOT' > "$EVIDENCE_DIR/result.txt"
+            exit 44
+          }
+          [[ "$(adb -s "$EMULATOR_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')" == '36' ]]
+
+          adb -s "$EMULATOR_SERIAL" shell input keyevent 82 || true
+          adb -s "$EMULATOR_SERIAL" shell settings put global window_animation_scale 0.0
+          adb -s "$EMULATOR_SERIAL" shell settings put global transition_animation_scale 0.0
+          adb -s "$EMULATOR_SERIAL" shell settings put global animator_duration_scale 0.0
+
+          if ! "$RUNNER_TEMP/f2-24-164-health.sh" boot_clean_1; then
+            echo 'classification=FAIL_ENVIRONMENT_BOOT_HEALTH' > "$EVIDENCE_DIR/result.txt"
+            exit 42
+          fi
+          sleep 5
+          if ! "$RUNNER_TEMP/f2-24-164-health.sh" boot_clean_2; then
+            echo 'classification=FAIL_ENVIRONMENT_BOOT_HEALTH' > "$EVIDENCE_DIR/result.txt"
+            exit 42
+          fi
+
+      - name: Install only private DEV and androidTest APKs
+        id: install
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! "$RUNNER_TEMP/f2-24-164-health.sh" pre_install; then
+            echo 'classification=FAIL_ENVIRONMENT_PRE_INSTALL' > "$EVIDENCE_DIR/result.txt"
+            exit 42
+          fi
+
+          set +e
+          adb -s "$EMULATOR_SERIAL" install -r -t "$PRIVATE_DIR/app.apk" > "$RUNNER_TEMP/f2-24-164-install-app.txt" 2>&1
+          APP_INSTALL_STATUS=$?
+          adb -s "$EMULATOR_SERIAL" install -r -t "$PRIVATE_DIR/test.apk" > "$RUNNER_TEMP/f2-24-164-install-test.txt" 2>&1
+          TEST_INSTALL_STATUS=$?
+          set -e
+
+          if ! "$RUNNER_TEMP/f2-24-164-health.sh" post_install; then
+            echo 'classification=FAIL_ENVIRONMENT_POST_INSTALL' > "$EVIDENCE_DIR/result.txt"
+            exit 42
+          fi
+          if [[ $APP_INSTALL_STATUS -ne 0 || $TEST_INSTALL_STATUS -ne 0 ]]; then
+            {
+              echo 'classification=FAIL_BRIDGE_INSTALL_CLEAN'
+              echo "app_install_status=$APP_INSTALL_STATUS"
+              echo "test_install_status=$TEST_INSTALL_STATUS"
+            } > "$EVIDENCE_DIR/result.txt"
+            exit 51
+          fi
+
+      - name: Run only Uber fixture OCR preflight
+        id: ocr
+        shell: bash
+        run: |
+          set -euo pipefail
+          RAW="$RUNNER_TEMP/f2-24-164-instrumentation-private.txt"
+          set +e
+          timeout 180s adb -s "$EMULATOR_SERIAL" shell am instrument -w -r \
+            -e class "$TEST_CLASS" \
+            "$TEST_PACKAGE/$TEST_RUNNER" \
+            > "$RAW" 2>&1
+          TEST_STATUS=$?
+          set -e
+
+          if ! "$RUNNER_TEMP/f2-24-164-health.sh" post_ocr; then
+            echo 'classification=FAIL_ENVIRONMENT_POST_OCR' > "$EVIDENCE_DIR/result.txt"
+            exit 42
+          fi
+
+          if [[ $TEST_STATUS -eq 0 ]] && grep -Fq 'OK (1 test)' "$RAW" && ! grep -Fq 'FAILURES!!!' "$RAW"; then
+            {
+              echo 'classification=PASS_F2_24_164'
+              echo 'environment=API36_4VCPU_CLEAN'
+              echo 'ocr_preflight=PASS_A_B_5OF5'
+              echo "source_sha=$FIXED_SOURCE_SHA"
+              echo "private_artifact_id=$PRIVATE_ARTIFACT_ID"
+              echo "app_sha256=$APP_SHA256"
+              echo "test_sha256=$TEST_SHA256"
+              echo "offer_a_sha256=$OFFER_A_SHA256"
+              echo "offer_b_sha256=$OFFER_B_SHA256"
+            } > "$EVIDENCE_DIR/result.txt"
+          else
+            {
+              echo 'classification=FAIL_OCR_PREFLIGHT_CLEAN'
+              echo 'environment=API36_4VCPU_CLEAN'
+              echo "instrumentation_status=$TEST_STATUS"
+              echo "source_sha=$FIXED_SOURCE_SHA"
+              echo "private_artifact_id=$PRIVATE_ARTIFACT_ID"
+            } > "$EVIDENCE_DIR/result.txt"
+            exit 52
+          fi
+
+      - name: Emit sanitized result only
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "$EVIDENCE_DIR"
+          if [[ ! -f "$EVIDENCE_DIR/result.txt" ]]; then
+            echo 'classification=FAIL_BRIDGE_UNCLASSIFIED' > "$EVIDENCE_DIR/result.txt"
+          fi
+          echo '--- host ---'
+          cat "$EVIDENCE_DIR/host-resources.txt" 2>/dev/null || true
+          echo '--- bundle integrity ---'
+          cat "$EVIDENCE_DIR/bundle-integrity.txt" 2>/dev/null || true
+          echo '--- health ---'
+          cat "$EVIDENCE_DIR/health-checkpoints.txt" 2>/dev/null || true
+          echo '--- result ---'
+          cat "$EVIDENCE_DIR/result.txt" 2>/dev/null || true
+
+      - name: Purge private material and terminate emulator
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          if timeout 5s adb -s "$EMULATOR_SERIAL" get-state 2>/dev/null | grep -qx device; then
+            timeout 5s adb -s "$EMULATOR_SERIAL" emu kill >/dev/null 2>&1 || true
+          fi
+          if [[ -f "$RUNNER_TEMP/f2-24-164-emulator.pid" ]]; then
+            kill "$(cat "$RUNNER_TEMP/f2-24-164-emulator.pid")" 2>/dev/null || true
+          fi
+          rm -rf \
+            "$RUNNER_TEMP/f2-24-164-private" \
+            "$RUNNER_TEMP/f2-24-164-private.zip" \
+            "$RUNNER_TEMP/f2-24-164-artifacts.json" \
+            "$RUNNER_TEMP/f2-24-164-instrumentation-private.txt" \
+            "$RUNNER_TEMP/f2-24-164-install-app.txt" \
+            "$RUNNER_TEMP/f2-24-164-install-test.txt" \
+            "$RUNNER_TEMP/f2-24-164-window-"* \
+            2>/dev/null || true
+
+      - name: Upload sanitized public evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: f2-24-164-sanitized-evidence
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
