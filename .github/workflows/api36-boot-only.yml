@@ -1,0 +1,249 @@
+name: API36 Boot-Only Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - probe-trigger.txt
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api36-boot-only
+  cancel-in-progress: false
+
+env:
+  AVD_NAME: api36-public-runner
+  EMULATOR_SERIAL: emulator-5554
+  EVIDENCE_DIR: evidence
+
+jobs:
+  boot-only:
+    name: API36 boot-only on public Linux runner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Record host capacity and require KVM
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$EVIDENCE_DIR"
+          {
+            echo "runner_os=$(uname -a)"
+            echo "logical_cpus=$(nproc)"
+            echo "memory_kib=$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
+            echo "arch=$(uname -m)"
+            df -h .
+          } > "$EVIDENCE_DIR/host-resources.txt"
+
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          test -r /dev/kvm
+          test -w /dev/kvm
+
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          test -d "$SDK_ROOT"
+          test -x "$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          test -x "$SDK_ROOT/cmdline-tools/latest/bin/avdmanager"
+          test -x "$SDK_ROOT/platform-tools/adb"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+      - name: Install pinned API36 emulator surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install emulator "system-images;android-36;google_apis;x86_64" >/dev/null
+          test -x "$ANDROID_SDK_ROOT/emulator/emulator"
+          test -f "$ANDROID_SDK_ROOT/system-images/android-36/google_apis/x86_64/source.properties"
+          "$ANDROID_SDK_ROOT/emulator/emulator" -version > "$EVIDENCE_DIR/emulator-version.txt" 2>&1
+          "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check > "$EVIDENCE_DIR/accel-check.txt" 2>&1
+          grep -Eiq 'KVM|accel' "$EVIDENCE_DIR/accel-check.txt"
+          cp "$ANDROID_SDK_ROOT/system-images/android-36/google_apis/x86_64/source.properties" "$EVIDENCE_DIR/system-image-source.properties"
+
+      - name: Prepare health helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/check-visible-systemui-anr.sh" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          attempt="${1:?attempt required}"
+          label="${2:?label required}"
+          window="$EVIDENCE_DIR/window-${attempt}-${label}.txt"
+          adb -s "$EMULATOR_SERIAL" shell dumpsys window windows > "$window" 2>&1
+          pid="$(adb -s "$EMULATOR_SERIAL" shell pidof com.android.systemui 2>/dev/null | tr -d '\r' || true)"
+          test -n "$pid"
+          printf '%s/%s systemui_pid=%s\n' "$attempt" "$label" "$pid" >> "$EVIDENCE_DIR/checkpoints.txt"
+          if awk '
+            /^  Window #[0-9]+ Window\{/ {
+              if (in_anr && visible) found=1
+              in_anr = index($0, "Application Not Responding: com.android.systemui") > 0
+              visible = 0
+              next
+            }
+            in_anr && /isVisible=true/ { visible=1 }
+            END {
+              if (in_anr && visible) found=1
+              exit(found ? 0 : 1)
+            }
+          ' "$window"; then
+            printf '%s/%s=VISIBLE_SYSTEMUI_ANR\n' "$attempt" "$label" | tee -a "$EVIDENCE_DIR/checkpoints.txt"
+            exit 42
+          fi
+          printf '%s/%s=CLEAN\n' "$attempt" "$label" >> "$EVIDENCE_DIR/checkpoints.txt"
+          BASH
+          chmod +x "$RUNNER_TEMP/check-visible-systemui-anr.sh"
+          bash -n "$RUNNER_TEMP/check-visible-systemui-anr.sh"
+
+      - name: Run two independent cold boots
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          stop_emulator() {
+            set +e
+            adb -s "$EMULATOR_SERIAL" emu kill >/dev/null 2>&1 || true
+            if [[ -f "$RUNNER_TEMP/emulator.pid" ]]; then
+              kill "$(cat "$RUNNER_TEMP/emulator.pid")" 2>/dev/null || true
+            fi
+            for _ in $(seq 1 30); do
+              if ! adb -s "$EMULATOR_SERIAL" get-state 2>/dev/null | grep -qx device; then break; fi
+              sleep 1
+            done
+            set -e
+          }
+
+          create_avd() {
+            rm -rf "$HOME/.android/avd/$AVD_NAME.avd" "$HOME/.android/avd/$AVD_NAME.ini"
+            echo no | avdmanager create avd --force \
+              -n "$AVD_NAME" \
+              --package "system-images;android-36;google_apis;x86_64" \
+              --device "pixel_6" >/dev/null
+            {
+              echo 'hw.cpu.ncore=4'
+              echo 'hw.ramSize=4096'
+              echo 'vm.heapSize=512'
+              echo 'disk.dataPartition.size=4096M'
+            } >> "$HOME/.android/avd/$AVD_NAME.avd/config.ini"
+          }
+
+          boot_attempt() {
+            local attempt="$1"
+            create_avd
+            cp "$HOME/.android/avd/$AVD_NAME.avd/config.ini" "$EVIDENCE_DIR/avd-config-${attempt}.ini"
+            adb start-server
+            nohup "$ANDROID_SDK_ROOT/emulator/emulator" \
+              -port 5554 -avd "$AVD_NAME" -no-window -accel on \
+              -gpu swiftshader_indirect -no-snapshot -noaudio -no-metrics \
+              > "$RUNNER_TEMP/emulator-${attempt}.log" 2>&1 &
+            echo $! > "$RUNNER_TEMP/emulator.pid"
+
+            local device_ready=false
+            for _ in $(seq 1 120); do
+              if adb -s "$EMULATOR_SERIAL" get-state 2>/dev/null | grep -qx device; then
+                device_ready=true
+                break
+              fi
+              sleep 2
+            done
+            [[ "$device_ready" == true ]] || return 41
+
+            local boot_ready=false
+            for _ in $(seq 1 120); do
+              local boot bootanim
+              boot="$(adb -s "$EMULATOR_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+              bootanim="$(adb -s "$EMULATOR_SERIAL" shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r' || true)"
+              printf '%s boot=%s bootanim=%s\n' "$attempt" "$boot" "$bootanim" > "$EVIDENCE_DIR/boot-state-${attempt}.txt"
+              if [[ "$boot" == '1' && "$bootanim" == 'stopped' ]]; then
+                boot_ready=true
+                break
+              fi
+              sleep 2
+            done
+            [[ "$boot_ready" == true ]] || return 44
+            [[ "$(adb -s "$EMULATOR_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')" == '36' ]] || return 45
+
+            adb -s "$EMULATOR_SERIAL" shell input keyevent 82 || true
+            adb -s "$EMULATOR_SERIAL" shell settings put global window_animation_scale 0.0
+            adb -s "$EMULATOR_SERIAL" shell settings put global transition_animation_scale 0.0
+            adb -s "$EMULATOR_SERIAL" shell settings put global animator_duration_scale 0.0
+
+            for q in 1 2 3 4 5 6; do
+              sleep 5
+              "$RUNNER_TEMP/check-visible-systemui-anr.sh" "$attempt" "quarantine_${q}"
+            done
+
+            local first_pid=""
+            for s in 1 2 3; do
+              "$RUNNER_TEMP/check-visible-systemui-anr.sh" "$attempt" "settled_${s}"
+              pid="$(adb -s "$EMULATOR_SERIAL" shell pidof com.android.systemui 2>/dev/null | tr -d '\r')"
+              if [[ -z "$first_pid" ]]; then
+                first_pid="$pid"
+              elif [[ "$pid" != "$first_pid" ]]; then
+                printf '%s/settled_%s=SYSTEMUI_PID_CHANGED first=%s current=%s\n' "$attempt" "$s" "$first_pid" "$pid" | tee -a "$EVIDENCE_DIR/checkpoints.txt"
+                return 43
+              fi
+              sleep 5
+            done
+
+            cp "$RUNNER_TEMP/emulator-${attempt}.log" "$EVIDENCE_DIR/emulator-${attempt}.log" 2>/dev/null || true
+            printf '%s=PASS\n' "$attempt" >> "$EVIDENCE_DIR/result.txt"
+          }
+
+          trap stop_emulator EXIT
+
+          set +e
+          boot_attempt boot1
+          status=$?
+          set -e
+          if [[ $status -ne 0 ]]; then
+            printf 'boot1=FAIL status=%s\nclassification=FAIL_API36_PUBLIC_BOOT_ONLY\n' "$status" >> "$EVIDENCE_DIR/result.txt"
+            cp "$RUNNER_TEMP/emulator-boot1.log" "$EVIDENCE_DIR/emulator-boot1.log" 2>/dev/null || true
+            exit "$status"
+          fi
+
+          stop_emulator
+          sleep 3
+
+          set +e
+          boot_attempt boot2
+          status=$?
+          set -e
+          if [[ $status -ne 0 ]]; then
+            printf 'boot2=FAIL status=%s\nclassification=FAIL_API36_PUBLIC_BOOT_ONLY\n' "$status" >> "$EVIDENCE_DIR/result.txt"
+            cp "$RUNNER_TEMP/emulator-boot2.log" "$EVIDENCE_DIR/emulator-boot2.log" 2>/dev/null || true
+            exit "$status"
+          fi
+
+          printf 'classification=PASS_API36_PUBLIC_BOOT_ONLY_REPEATABLE\n' >> "$EVIDENCE_DIR/result.txt"
+
+      - name: Collect final diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p "$EVIDENCE_DIR"
+          if adb -s "$EMULATOR_SERIAL" get-state 2>/dev/null | grep -qx device; then
+            adb -s "$EMULATOR_SERIAL" shell dumpsys window windows > "$EVIDENCE_DIR/window-final.txt" 2>&1 || true
+            adb -s "$EMULATOR_SERIAL" logcat -d -t 2000 > "$EVIDENCE_DIR/logcat-final.txt" 2>&1 || true
+          fi
+          if [[ ! -f "$EVIDENCE_DIR/result.txt" ]] || ! grep -Fq 'classification=' "$EVIDENCE_DIR/result.txt"; then
+            printf 'classification=FAIL_API36_PUBLIC_BOOT_ONLY\n' >> "$EVIDENCE_DIR/result.txt"
+          fi
+          cat "$EVIDENCE_DIR/host-resources.txt" 2>/dev/null || true
+          cat "$EVIDENCE_DIR/checkpoints.txt" 2>/dev/null || true
+          cat "$EVIDENCE_DIR/result.txt" 2>/dev/null || true
+
+      - name: Upload boot-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: api36-public-boot-only-evidence
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
