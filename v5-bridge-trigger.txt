@@ -1,0 +1,4 @@
+trigger=2026-09-17T00:10:00-03:00
+source=877a233e19fef47c72730c633dfd98a862ea0088
+base_artifact_id=10477985703
+addons_artifact_id=10478546947
