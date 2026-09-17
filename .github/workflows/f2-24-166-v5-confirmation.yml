@@ -1,0 +1,334 @@
+name: F2-24-166 V5 Integrated Confirmation
+
+on:
+  push:
+    paths:
+      - 'f2-24-166-v5-trigger.txt'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: f2-24-166-v5-confirmation
+  cancel-in-progress: false
+
+env:
+  FIXED_SOURCE_SHA: 7e32dafd89614eaeb4c2acdd743aeb6642413652
+  TOOLING_BASELINE_SOURCE_SHA: 877a233e19fef47c72730c633dfd98a862ea0088
+  PRIVATE_REPOSITORY: mferreirasilva/AppMotora
+  BASE_ARTIFACT_NAME: f2-24-166-v5-base-7e32dafd8961
+  ADDONS_ARTIFACT_NAME: f2-24-163-v5-addons-877a233e19fe
+  AVD_NAME: f2-24-166-v5-api36
+  EMULATOR_SERIAL: emulator-5554
+  PUBLIC_EVIDENCE_DIR: evidence
+
+jobs:
+  v5-confirmation:
+    name: API36 4-vCPU integrated A-B-A confirmation
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+
+    steps:
+      - name: Resolve private product and validated test-tooling bundles - FAIL FAST
+        shell: bash
+        env:
+          PRIVATE_TOKEN: ${{ secrets.APPMOTORA_PRIVATE_ARTIFACT_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$PUBLIC_EVIDENCE_DIR"
+          {
+            echo "logical_cpus=$(nproc)"
+            echo "memory_kib=$(awk '/MemTotal/ {print $2}' /proc/meminfo)"
+            echo "arch=$(uname -m)"
+          } > "$PUBLIC_EVIDENCE_DIR/host-resources.txt"
+          (( $(nproc) >= 4 )) || { echo 'classification=FAIL_ENVIRONMENT_HOST_LT_4_VCPU' > "$PUBLIC_EVIDENCE_DIR/result.txt"; exit 40; }
+          [[ -n "${PRIVATE_TOKEN:-}" ]] || { echo 'classification=BLOCKED_PRIVATE_ARTIFACT_TOKEN' > "$PUBLIC_EVIDENCE_DIR/result.txt"; exit 78; }
+
+          BASE_DIR="$RUNNER_TEMP/f2-24-166-v5-base"
+          ADDONS_DIR="$RUNNER_TEMP/f2-24-166-v5-addons"
+          rm -rf "$BASE_DIR" "$ADDONS_DIR"
+          mkdir -p "$BASE_DIR" "$ADDONS_DIR"
+
+          download_private_artifact() {
+            local name="$1" destination="$2" prefix="$3"
+            local json="$RUNNER_TEMP/${prefix}-artifacts.json"
+            local zip="$RUNNER_TEMP/${prefix}.zip"
+            local api="https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/artifacts"
+            curl --fail --silent --show-error \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer $PRIVATE_TOKEN" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "$api?name=$name&per_page=20" -o "$json"
+            local id digest
+            id="$(jq -r '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].id // empty' "$json")"
+            digest="$(jq -r '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | reverse | .[0].digest // empty' "$json")"
+            [[ -n "$id" ]]
+            curl --fail --silent --show-error --location \
+              -H 'Accept: application/vnd.github+json' \
+              -H "Authorization: Bearer $PRIVATE_TOKEN" \
+              -H 'X-GitHub-Api-Version: 2022-11-28' \
+              "$api/$id/zip" -o "$zip"
+            if [[ "$digest" =~ ^sha256:([0-9a-f]{64})$ ]]; then
+              [[ "$(sha256sum "$zip" | awk '{print $1}')" == "${BASH_REMATCH[1]}" ]]
+            fi
+            unzip -q "$zip" -d "$destination"
+            echo "$id"
+          }
+
+          BASE_ARTIFACT_ID="$(download_private_artifact "$BASE_ARTIFACT_NAME" "$BASE_DIR" f2-24-166-base)"
+          ADDONS_ARTIFACT_ID="$(download_private_artifact "$ADDONS_ARTIFACT_NAME" "$ADDONS_DIR" f2-24-166-addons)"
+          test -f "$BASE_DIR/app.apk" && test -f "$BASE_DIR/test.apk" && test -f "$BASE_DIR/base.env"
+          test -f "$ADDONS_DIR/helper.apk" && test -f "$ADDONS_DIR/stage5-host-v5.sh" && test -f "$ADDONS_DIR/addons.env"
+
+          set -a; source "$BASE_DIR/base.env"; set +a
+          PRODUCT_SOURCE_SHA="$SOURCE_SHA"
+          PRODUCT_APP_SHA="$APP_SHA256"
+          PRODUCT_TEST_SHA="$TEST_SHA256"
+          PRODUCT_APP_PACKAGE="$APP_PACKAGE"
+          PRODUCT_TEST_PACKAGE="$TEST_PACKAGE"
+          PRODUCT_SERVICE_CLASS="$SERVICE_CLASS"
+
+          set -a; source "$ADDONS_DIR/addons.env"; set +a
+          TOOLING_SOURCE_SHA="$SOURCE_SHA"
+
+          [[ "$PRODUCT_SOURCE_SHA" == "$FIXED_SOURCE_SHA" ]]
+          [[ "$TOOLING_SOURCE_SHA" == "$TOOLING_BASELINE_SOURCE_SHA" ]]
+          [[ "$PRODUCT_APP_PACKAGE" == 'br.com.appmotora.dev' ]]
+          [[ "$PRODUCT_TEST_PACKAGE" == 'br.com.appmotora.dev.test' ]]
+          [[ "$IDENTITY_CONTRACT" == 'REUSED_F2_24_160_PASS_4OF4' ]]
+          echo "$PRODUCT_APP_SHA  $BASE_DIR/app.apk" | sha256sum --check - >/dev/null
+          echo "$PRODUCT_TEST_SHA  $BASE_DIR/test.apk" | sha256sum --check - >/dev/null
+          echo "$HELPER_SHA256  $ADDONS_DIR/helper.apk" | sha256sum --check - >/dev/null
+          echo "$HARNESS_SHA256  $ADDONS_DIR/stage5-host-v5.sh" | sha256sum --check - >/dev/null
+          chmod 700 "$ADDONS_DIR/stage5-host-v5.sh"
+          bash -n "$ADDONS_DIR/stage5-host-v5.sh"
+          "$ADDONS_DIR/stage5-host-v5.sh" --self-test >/dev/null
+
+          {
+            echo "source_sha=$FIXED_SOURCE_SHA"
+            echo "base_private_artifact_id=$BASE_ARTIFACT_ID"
+            echo "tooling_private_artifact_id=$ADDONS_ARTIFACT_ID"
+            echo "app_sha256=$PRODUCT_APP_SHA"
+            echo "test_sha256=$PRODUCT_TEST_SHA"
+            echo "helper_sha256=$HELPER_SHA256"
+            echo "harness_sha256=$HARNESS_SHA256"
+            echo 'bundle_integrity=PASS'
+            echo 'f2_24_166_instrumented_gate=PASS_6OF6'
+            echo 'test_tooling=REUSED_VALIDATED_F2_24_163'
+          } > "$PUBLIC_EVIDENCE_DIR/bundle-integrity.txt"
+
+          echo "BASE_DIR=$BASE_DIR" >> "$GITHUB_ENV"
+          echo "ADDONS_DIR=$ADDONS_DIR" >> "$GITHUB_ENV"
+          echo "BASE_ARTIFACT_ID=$BASE_ARTIFACT_ID" >> "$GITHUB_ENV"
+          echo "ADDONS_ARTIFACT_ID=$ADDONS_ARTIFACT_ID" >> "$GITHUB_ENV"
+          echo "APP_PACKAGE=$PRODUCT_APP_PACKAGE" >> "$GITHUB_ENV"
+          echo "TEST_PACKAGE=$PRODUCT_TEST_PACKAGE" >> "$GITHUB_ENV"
+          echo "SERVICE_CLASS=$PRODUCT_SERVICE_CLASS" >> "$GITHUB_ENV"
+          echo "HELPER_PACKAGE=$HELPER_PACKAGE" >> "$GITHUB_ENV"
+          echo "HELPER_ACTIVITY=$HELPER_ACTIVITY" >> "$GITHUB_ENV"
+
+      - name: Prepare CLEAN API36 4-vCPU emulator
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -e /dev/kvm
+          sudo chmod 666 /dev/kvm
+          test -r /dev/kvm && test -w /dev/kvm
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          export PATH="$SDK_ROOT/cmdline-tools/latest/bin:$SDK_ROOT/platform-tools:$PATH"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$AVD_HOME"
+          export ANDROID_AVD_HOME="$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
+          if ! ldconfig -p | grep -Fq 'libpulse.so.0'; then sudo apt-get update -qq && sudo apt-get install -y --no-install-recommends libpulse0 >/dev/null; fi
+          sdkmanager --install emulator 'system-images;android-36;google_apis;x86_64' >/dev/null
+          "$ANDROID_SDK_ROOT/emulator/emulator" -version > "$PUBLIC_EVIDENCE_DIR/emulator-version.txt" 2>&1
+          "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check > "$PUBLIC_EVIDENCE_DIR/accel-check.txt" 2>&1
+
+          cat > "$RUNNER_TEMP/f2-24-166-v5-health.sh" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          label="${1:?checkpoint required}"
+          window="$RUNNER_TEMP/f2-24-166-v5-window-${label}.txt"
+          timeout 65s adb -s "$EMULATOR_SERIAL" shell cmd package wait-for-handler --timeout 60000 >/dev/null 2>&1
+          timeout 65s adb -s "$EMULATOR_SERIAL" shell cmd package wait-for-background-handler --timeout 60000 >/dev/null 2>&1
+          timeout 15s adb -s "$EMULATOR_SERIAL" shell pm path android >/dev/null 2>&1
+          timeout 15s adb -s "$EMULATOR_SERIAL" shell dumpsys window windows > "$window" 2>&1
+          pid="$(timeout 10s adb -s "$EMULATOR_SERIAL" shell pidof com.android.systemui 2>/dev/null | tr -d '\r' || true)"
+          test -n "$pid"
+          if awk '
+            /^  Window #[0-9]+ Window\{/ { if (in_anr && visible) found=1; in_anr=index($0,"Application Not Responding: com.android.systemui")>0; visible=0; next }
+            in_anr && /isVisible=true/ { visible=1 }
+            END { if (in_anr && visible) found=1; exit(found ? 0 : 1) }
+          ' "$window"; then
+            printf '%s=VISIBLE_SYSTEMUI_ANR pid=%s\n' "$label" "$pid" >> "$PUBLIC_EVIDENCE_DIR/health-checkpoints.txt"
+            rm -f "$window"; exit 42
+          fi
+          previous="$(cat "$RUNNER_TEMP/f2-24-166-v5-last-systemui-pid.txt" 2>/dev/null || true)"
+          if [[ -n "$previous" && "$previous" != "$pid" ]]; then
+            printf '%s=SYSTEMUI_PID_CHANGED previous=%s current=%s\n' "$label" "$previous" "$pid" >> "$PUBLIC_EVIDENCE_DIR/health-checkpoints.txt"
+            rm -f "$window"; exit 43
+          fi
+          printf '%s' "$pid" > "$RUNNER_TEMP/f2-24-166-v5-last-systemui-pid.txt"
+          printf '%s=CLEAN systemui_pid=%s\n' "$label" "$pid" >> "$PUBLIC_EVIDENCE_DIR/health-checkpoints.txt"
+          rm -f "$window"
+          BASH
+          chmod +x "$RUNNER_TEMP/f2-24-166-v5-health.sh"
+
+          rm -rf "$ANDROID_AVD_HOME/$AVD_NAME.avd" "$ANDROID_AVD_HOME/$AVD_NAME.ini"
+          echo no | avdmanager create avd --force -n "$AVD_NAME" --package 'system-images;android-36;google_apis;x86_64' --device 'pixel_6' >/dev/null
+          {
+            echo 'hw.cpu.ncore=4'; echo 'hw.ramSize=4096'; echo 'vm.heapSize=512'; echo 'disk.dataPartition.size=4096M'
+          } >> "$ANDROID_AVD_HOME/$AVD_NAME.avd/config.ini"
+          adb start-server
+          nohup "$ANDROID_SDK_ROOT/emulator/emulator" -port 5554 -avd "$AVD_NAME" -no-window -accel on -gpu swiftshader_indirect -no-snapshot -noaudio -no-metrics > "$RUNNER_TEMP/f2-24-166-v5-emulator.log" 2>&1 &
+          READY=false
+          for _ in $(seq 1 120); do if adb -s "$EMULATOR_SERIAL" get-state 2>/dev/null | grep -qx device; then READY=true; break; fi; sleep 2; done
+          [[ "$READY" == true ]] || { echo 'classification=FAIL_ENVIRONMENT_EMULATOR_DEVICE' > "$PUBLIC_EVIDENCE_DIR/result.txt"; exit 41; }
+          BOOT=false
+          for _ in $(seq 1 120); do
+            [[ "$(adb -s "$EMULATOR_SERIAL" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)" == 1 && "$(adb -s "$EMULATOR_SERIAL" shell getprop init.svc.bootanim 2>/dev/null | tr -d '\r' || true)" == stopped ]] && { BOOT=true; break; }
+            sleep 2
+          done
+          [[ "$BOOT" == true ]] || { echo 'classification=FAIL_ENVIRONMENT_EMULATOR_BOOT' > "$PUBLIC_EVIDENCE_DIR/result.txt"; exit 44; }
+          [[ "$(adb -s "$EMULATOR_SERIAL" shell getprop ro.build.version.sdk | tr -d '\r')" == 36 ]]
+          adb -s "$EMULATOR_SERIAL" shell settings put global window_animation_scale 0.0
+          adb -s "$EMULATOR_SERIAL" shell settings put global transition_animation_scale 0.0
+          adb -s "$EMULATOR_SERIAL" shell settings put global animator_duration_scale 0.0
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" boot_clean_1
+          sleep 5
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" boot_clean_2
+
+      - name: Install private product APKs and validated helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" pre_install
+          adb -s "$EMULATOR_SERIAL" install -r -t "$BASE_DIR/app.apk" >/dev/null
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" after_app_install
+          adb -s "$EMULATOR_SERIAL" install -r -t "$BASE_DIR/test.apk" >/dev/null
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" after_test_install
+          adb -s "$EMULATOR_SERIAL" install -r "$ADDONS_DIR/helper.apk" >/dev/null
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" after_helper_install
+          adb -s "$EMULATOR_SERIAL" shell pm path "$APP_PACKAGE" >/dev/null
+          adb -s "$EMULATOR_SERIAL" shell pm path "$TEST_PACKAGE" >/dev/null
+          adb -s "$EMULATOR_SERIAL" shell pm path "$HELPER_PACKAGE" >/dev/null
+
+      - name: Enable existing Accessibility and overlay capability
+        shell: bash
+        run: |
+          set -euo pipefail
+          COMPONENT="$APP_PACKAGE/$SERVICE_CLASS"
+          adb -s "$EMULATOR_SERIAL" shell settings put secure enabled_accessibility_services "$COMPONENT"
+          adb -s "$EMULATOR_SERIAL" shell settings put secure accessibility_enabled 1
+          adb -s "$EMULATOR_SERIAL" shell appops set "$APP_PACKAGE" SYSTEM_ALERT_WINDOW allow
+          READY=false
+          for _ in $(seq 1 30); do
+            state="$(adb -s "$EMULATOR_SERIAL" shell dumpsys accessibility 2>/dev/null || true)"
+            if grep -Fq 'Bound services:{Service[' <<< "$state" && grep -Fq "$COMPONENT" <<< "$state"; then READY=true; break; fi
+            sleep 1
+          done
+          [[ "$READY" == true ]] || { echo 'classification=FAIL_FUNCTIONAL_ACCESSIBILITY_NOT_BOUND' > "$PUBLIC_EVIDENCE_DIR/result.txt"; exit 50; }
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" post_accessibility
+
+      - name: Run exactly one integrated V5 A-B-A confirmation
+        shell: bash
+        run: |
+          set -euo pipefail
+          PRIVATE_EVIDENCE="$RUNNER_TEMP/f2-24-166-v5-private-evidence"
+          RAW_STDOUT="$RUNNER_TEMP/f2-24-166-v5-private-stdout.txt"
+          rm -rf "$PRIVATE_EVIDENCE" "$RAW_STDOUT"
+          mkdir -p "$PRIVATE_EVIDENCE"
+          set +e
+          EMULATOR_SERIAL="$EMULATOR_SERIAL" \
+          APP_PACKAGE="$APP_PACKAGE" \
+          SERVICE_CLASS="$SERVICE_CLASS" \
+          HELPER_PACKAGE="$HELPER_PACKAGE" \
+          HELPER_ACTIVITY="$HELPER_ACTIVITY" \
+          EVIDENCE_DIR="$PRIVATE_EVIDENCE" \
+            "$ADDONS_DIR/stage5-host-v5.sh" > "$RAW_STDOUT" 2>&1
+          STATUS=$?
+          set -e
+          "$RUNNER_TEMP/f2-24-166-v5-health.sh" post_integrated || { echo 'classification=FAIL_ENVIRONMENT_POST_INTEGRATED' > "$PUBLIC_EVIDENCE_DIR/result.txt"; exit 42; }
+
+          PRIVATE_RESULT="$PRIVATE_EVIDENCE/v5-integrated-result.txt"
+          test -f "$PRIVATE_RESULT"
+          if [[ $STATUS -ne 0 ]]; then
+            CAUSE="$(grep -E '^cause=' "$PRIVATE_RESULT" | head -n1 | cut -d= -f2- || true)"
+            {
+              echo 'classification=FAIL_F2_24_166_V5_INTEGRATED_CLEAN'
+              echo 'environment=API36_4VCPU_CLEAN'
+              echo "cause=${CAUSE:-UNKNOWN}"
+              echo "source_sha=$FIXED_SOURCE_SHA"
+            } > "$PUBLIC_EVIDENCE_DIR/result.txt"
+            exit 52
+          fi
+
+          grep -Eq '^classification=PASS_EMULATOR_V5_CONTINUOUS' "$PRIVATE_RESULT"
+          grep -Fxq 'api_level=36' "$PRIVATE_RESULT"
+          grep -Fxq 'production_ocr=true' "$PRIVATE_RESULT"
+          grep -Fxq 'continuous_runtime_same_session=true' "$PRIVATE_RESULT"
+          grep -Fxq 'offer_1=A' "$PRIVATE_RESULT"
+          grep -Fxq 'offer_1_generation=1' "$PRIVATE_RESULT"
+          grep -Fxq 'offer_2=B' "$PRIVATE_RESULT"
+          grep -Fxq 'offer_2_generation=2' "$PRIVATE_RESULT"
+          grep -Fxq 'offer_3=A' "$PRIVATE_RESULT"
+          grep -Fxq 'offer_3_generation=3' "$PRIVATE_RESULT"
+          grep -Fxq 'normalized_offer_count=3' "$PRIVATE_RESULT"
+          grep -Fxq 'target_lost_count=3' "$PRIVATE_RESULT"
+          grep -Fxq 'final_card_removal_closes_overlay=true' "$PRIVATE_RESULT"
+          grep -Fxq 'runtime_restarted=false' "$PRIVATE_RESULT"
+          grep -Fxq 'manual_rearm=false' "$PRIVATE_RESULT"
+
+          cat > "$PUBLIC_EVIDENCE_DIR/result.txt" <<EOF
+          classification=PASS_F2_24_166_V5_INTEGRATED
+          environment=API36_4VCPU_CLEAN
+          source_sha=$FIXED_SOURCE_SHA
+          base_private_artifact_id=$BASE_ARTIFACT_ID
+          tooling_private_artifact_id=$ADDONS_ARTIFACT_ID
+          f2_24_166_instrumented=PASS_6OF6
+          continuous_runtime_same_session=true
+          offer_sequence=A-B-A
+          normalized_offer_count=3
+          target_lost_count=3
+          generation_sequence=1-2-3
+          final_card_removal_closes_overlay=true
+          runtime_restarted=false
+          manual_rearm=false
+          real_provider=false
+          physical_device=false
+          EOF
+
+      - name: Remove private material before public evidence upload
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "${BASE_DIR:-$RUNNER_TEMP/f2-24-166-v5-base}" "${ADDONS_DIR:-$RUNNER_TEMP/f2-24-166-v5-addons}" "$RUNNER_TEMP/f2-24-166-v5-private-evidence"
+          rm -f "$RUNNER_TEMP"/f2-24-166-base.zip "$RUNNER_TEMP"/f2-24-166-addons.zip "$RUNNER_TEMP"/f2-24-166-base-artifacts.json "$RUNNER_TEMP"/f2-24-166-addons-artifacts.json "$RUNNER_TEMP/f2-24-166-v5-private-stdout.txt"
+          ! find "$PUBLIC_EVIDENCE_DIR" -type f \( -name '*.apk' -o -name '*.png' \) | grep -q .
+
+      - name: Upload sanitized V5 evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: f2-24-166-v5-sanitized
+          path: evidence/**
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Record sanitized summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo '### F2-24-166 V5 integrated confirmation'
+            echo ''
+            sed 's/^/- /' "$PUBLIC_EVIDENCE_DIR/result.txt" 2>/dev/null || true
+            echo '- Private APK/helper/harness/raw logs removed before public evidence upload.'
+          } >> "$GITHUB_STEP_SUMMARY"
