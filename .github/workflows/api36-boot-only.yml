@@ -52,6 +52,10 @@ jobs:
           echo "$SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
+          AVD_HOME="$HOME/.android/avd"
+          mkdir -p "$AVD_HOME"
+          echo "ANDROID_AVD_HOME=$AVD_HOME" >> "$GITHUB_ENV"
+
       - name: Install pinned API36 emulator surface
         shell: bash
         run: |
@@ -120,23 +124,28 @@ jobs:
           }
 
           create_avd() {
-            rm -rf "$HOME/.android/avd/$AVD_NAME.avd" "$HOME/.android/avd/$AVD_NAME.ini"
-            echo no | avdmanager create avd --force \
+            local attempt="$1"
+            rm -rf "$ANDROID_AVD_HOME/$AVD_NAME.avd" "$ANDROID_AVD_HOME/$AVD_NAME.ini"
+            if ! (echo no | avdmanager create avd --force \
               -n "$AVD_NAME" \
               --package "system-images;android-36;google_apis;x86_64" \
-              --device "pixel_6" >/dev/null
+              --device "pixel_6") > "$EVIDENCE_DIR/avdmanager-${attempt}.txt" 2>&1; then
+              return 48
+            fi
+            [[ -f "$ANDROID_AVD_HOME/$AVD_NAME.ini" ]] || return 49
+            [[ -f "$ANDROID_AVD_HOME/$AVD_NAME.avd/config.ini" ]] || return 49
             {
               echo 'hw.cpu.ncore=4'
               echo 'hw.ramSize=4096'
               echo 'vm.heapSize=512'
               echo 'disk.dataPartition.size=4096M'
-            } >> "$HOME/.android/avd/$AVD_NAME.avd/config.ini"
+            } >> "$ANDROID_AVD_HOME/$AVD_NAME.avd/config.ini"
           }
 
           boot_attempt() {
             local attempt="$1"
-            create_avd
-            cp "$HOME/.android/avd/$AVD_NAME.avd/config.ini" "$EVIDENCE_DIR/avd-config-${attempt}.ini"
+            create_avd "$attempt" || return $?
+            cp "$ANDROID_AVD_HOME/$AVD_NAME.avd/config.ini" "$EVIDENCE_DIR/avd-config-${attempt}.ini"
             adb start-server
             nohup "$ANDROID_SDK_ROOT/emulator/emulator" \
               -port 5554 -avd "$AVD_NAME" -no-window -accel on \
@@ -176,12 +185,12 @@ jobs:
 
             for q in 1 2 3 4 5 6; do
               sleep 5
-              "$RUNNER_TEMP/check-visible-systemui-anr.sh" "$attempt" "quarantine_${q}"
+              "$RUNNER_TEMP/check-visible-systemui-anr.sh" "$attempt" "quarantine_${q}" || return $?
             done
 
             local first_pid=""
             for s in 1 2 3; do
-              "$RUNNER_TEMP/check-visible-systemui-anr.sh" "$attempt" "settled_${s}"
+              "$RUNNER_TEMP/check-visible-systemui-anr.sh" "$attempt" "settled_${s}" || return $?
               pid="$(adb -s "$EMULATOR_SERIAL" shell pidof com.android.systemui 2>/dev/null | tr -d '\r')"
               if [[ -z "$first_pid" ]]; then
                 first_pid="$pid"
