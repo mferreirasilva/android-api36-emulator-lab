@@ -56,9 +56,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          sudo apt-get update >/dev/null
+          sudo apt-get install -y --no-install-recommends libpulse0 >/dev/null
           sdkmanager --install emulator "system-images;android-36;google_apis;x86_64" >/dev/null
           test -x "$ANDROID_SDK_ROOT/emulator/emulator"
           test -f "$ANDROID_SDK_ROOT/system-images/android-36/google_apis/x86_64/source.properties"
+          ldd "$ANDROID_SDK_ROOT/emulator/qemu/linux-x86_64/qemu-system-x86_64" > "$EVIDENCE_DIR/emulator-ldd.txt" 2>&1
+          if grep -Fq 'not found' "$EVIDENCE_DIR/emulator-ldd.txt"; then
+            cat "$EVIDENCE_DIR/emulator-ldd.txt"
+            exit 47
+          fi
           "$ANDROID_SDK_ROOT/emulator/emulator" -version > "$EVIDENCE_DIR/emulator-version.txt" 2>&1
           "$ANDROID_SDK_ROOT/emulator/emulator" -accel-check > "$EVIDENCE_DIR/accel-check.txt" 2>&1
           grep -Eiq 'KVM|accel' "$EVIDENCE_DIR/accel-check.txt"
