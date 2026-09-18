@@ -1,1 +1,1 @@
-F2-24-173 integrated runtime regression
+F2-24-173 integrated runtime regression rerun after harness-only criterion fix
