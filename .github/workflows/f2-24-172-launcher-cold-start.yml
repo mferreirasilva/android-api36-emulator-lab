@@ -256,7 +256,7 @@ jobs:
           "$RUNNER_TEMP/f2-24-172-health.sh" post_launcher
 
           cat > "$EVIDENCE_DIR/result.txt" <<EOF
-          classification=PASS_F2_24_170_LAUNCHER_COLD_START
+          classification=PASS_F2_24_172_LAUNCHER_COLD_START
           environment=API36_4VCPU_CLEAN
           process_alive=true
           main_activity_foreground=true
