@@ -1,1 +1,1 @@
-F2-24-173 integrated runtime regression rerun after harness-only criterion fix
+F2-24-173 integrated runtime regression v2 — zero partial acceptable
