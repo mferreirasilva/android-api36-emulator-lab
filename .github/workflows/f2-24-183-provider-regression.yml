@@ -15,7 +15,7 @@ concurrency:
 env:
   PRIVATE_REPOSITORY: mferreirasilva/AppMotora
   PRIVATE_ARTIFACT_NAME: f2-24-183-provider-regression-bundle
-  EXPECTED_SOURCE_SHA: f75b2a00c06efd7c65a78cfb3cd525342efe452b
+  EXPECTED_SOURCE_SHA: 637da3b98d5eb22966ada3906205414ec9e351cf
   EXPECTED_TEST_99: br.com.appmotora.NinetyNineProviderRuntimeInstrumentedTest
   EXPECTED_TEST_UBER: br.com.appmotora.UberOfferSpatialRuntimeFallbackInstrumentedTest
   EXPECTED_TEST_RUNNER: androidx.test.runner.AndroidJUnitRunner
