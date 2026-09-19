@@ -1,4 +1,4 @@
-name: F2-24-179 Post-Decision Latency Gate
+name: F2-24-180 Visual Close Latency Gate
 
 on:
   push:
@@ -9,19 +9,19 @@ permissions:
   contents: read
 
 concurrency:
-  group: f2-24-179-runtime-same-offer
+  group: f2-24-180-runtime-same-offer
   cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: mferreirasilva/AppMotora
-  PRIVATE_ARTIFACT_NAME: f2-24-179-runtime-bundle
-  AVD_NAME: f2-24-179-runtime-api36
+  PRIVATE_ARTIFACT_NAME: f2-24-180-runtime-bundle
+  AVD_NAME: f2-24-180-runtime-api36
   EMULATOR_SERIAL: emulator-5554
   EVIDENCE_DIR: evidence
 
 jobs:
   hold-gate:
-    name: API36 4-vCPU no-flap plus bounded close latency
+    name: API36 4-vCPU visual no-flap plus bounded close latency
     runs-on: ubuntu-24.04
     timeout-minutes: 25
 
@@ -194,11 +194,19 @@ jobs:
           LOST_DURING_HOLD="$(grep -Ec 'M4_TARGET_LOST ' <<< "$DELTA" || true)"
           NORMALIZED_DURING_HOLD="$(grep -Ec 'OFFER_NORMALIZED package=com\.ubercab\.driver ' <<< "$DELTA" || true)"
           EMPTY_DURING_HOLD="$(grep -Ec 'V5_RUNTIME status=RUNNING state=EMPTY generation=none' <<< "$DELTA" || true)"
+          VISUAL_FAST_PATH="$(grep -Ec 'M4_POST_DECISION_WATCH_STARTED .*visualFastPath=true' "$LOG" || true)"
+          VISUAL_PRESENT_COUNT="$(grep -Ec 'M4_POST_DECISION_VISUAL decision=PRESENT ' <<< "$DELTA" || true)"
+          VISUAL_PENDING_DURING_HOLD="$(grep -Ec 'M4_POST_DECISION_VISUAL decision=CHANGE_PENDING ' <<< "$DELTA" || true)"
+          HOLD_ROI_OCR_COUNT="$(grep -Ec 'M4_OCR variant=POST_DECISION_ROI ' <<< "$DELTA" || true)"
           [[ "$FALLBACK_COUNT" == 0 ]] || { echo 'classification=FAIL_SPATIAL_FALLBACK_RAN_ON_NORMAL_5OF5_PATH' > "$EVIDENCE_DIR/result.txt"; exit 61; }
           [[ "$LOST_DURING_HOLD" == 0 ]] || { echo 'classification=FAIL_FALSE_TARGET_LOSS_DURING_HOLD' > "$EVIDENCE_DIR/result.txt"; exit 62; }
           [[ "$NORMALIZED_DURING_HOLD" == 0 ]] || { echo 'classification=FAIL_DUPLICATE_NORMALIZATION_DURING_HOLD' > "$EVIDENCE_DIR/result.txt"; exit 63; }
           [[ "$EMPTY_DURING_HOLD" == 0 ]] || { echo 'classification=FAIL_RUNTIME_EMPTY_DURING_HOLD' > "$EVIDENCE_DIR/result.txt"; exit 64; }
           overlay_attached || { echo 'classification=FAIL_OVERLAY_NOT_STABLE_DURING_HOLD' > "$EVIDENCE_DIR/result.txt"; exit 65; }
+          [[ "$VISUAL_FAST_PATH" -ge 1 ]] || { echo 'classification=FAIL_VISUAL_FAST_PATH_NOT_ARMED' > "$EVIDENCE_DIR/result.txt"; exit 71; }
+          [[ "$VISUAL_PRESENT_COUNT" -ge 3 ]] || { echo 'classification=FAIL_VISUAL_FAST_PATH_NOT_EXERCISED' > "$EVIDENCE_DIR/result.txt"; exit 72; }
+          [[ "$VISUAL_PENDING_DURING_HOLD" == 0 ]] || { echo 'classification=FAIL_VISUAL_CHANGE_DURING_STABLE_HOLD' > "$EVIDENCE_DIR/result.txt"; exit 73; }
+          [[ "$HOLD_ROI_OCR_COUNT" == 0 ]] || { echo 'classification=FAIL_OCR_USED_DURING_VISUAL_HOLD' > "$EVIDENCE_DIR/result.txt"; exit 74; }
 
           REMOVAL_LINE=$(( $(wc -l < "$LOG") + 1 ))
           REMOVAL_START_MS="$(date +%s%3N)"
@@ -216,20 +224,29 @@ jobs:
           collect
           REMOVAL="$(tail -n "+$REMOVAL_LINE" "$LOG")"
           LOST_AFTER="$(grep -Ec 'M4_TARGET_LOST ' <<< "$REMOVAL" || true)"
+          VISUAL_LOST_AFTER="$(grep -Ec 'M4_TARGET_LOST method=ROI_VISUAL ' <<< "$REMOVAL" || true)"
           REMOVAL_SCREENSHOT_COUNT="$(grep -Ec 'SCREENSHOT_SUCCESS ' <<< "$REMOVAL" || true)"
+          REMOVAL_VISUAL_COUNT="$(grep -Ec 'M4_POST_DECISION_VISUAL ' <<< "$REMOVAL" || true)"
+          REMOVAL_VISUAL_PENDING_COUNT="$(grep -Ec 'M4_POST_DECISION_VISUAL decision=CHANGE_PENDING ' <<< "$REMOVAL" || true)"
+          REMOVAL_VISUAL_LOST_COUNT="$(grep -Ec 'M4_POST_DECISION_VISUAL decision=TARGET_LOST ' <<< "$REMOVAL" || true)"
           REMOVAL_ROI_OCR_COUNT="$(grep -Ec 'M4_OCR variant=POST_DECISION_ROI ' <<< "$REMOVAL" || true)"
           REMOVAL_RESULT_COUNT="$(grep -Ec 'M4_RESULT .*postDecisionMonitoring=true' <<< "$REMOVAL" || true)"
           REMOVAL_COMPLETE_COUNT="$(grep -Ec 'M4_RESULT .*OCR_5OF5=true .*postDecisionMonitoring=true' <<< "$REMOVAL" || true)"
           REMOVAL_PARTIAL_COUNT="$(grep -Ec 'M4_RESULT .*OCR_5OF5=false .*postDecisionMonitoring=true' <<< "$REMOVAL" || true)"
           REMOVAL_ROI_FALLBACK_COUNT="$(grep -Ec 'M4_POST_DECISION_ROI_FALLBACK ' <<< "$REMOVAL" || true)"
           ROI_FAST_PATH="$(grep -Ec 'M4_POST_DECISION_WATCH_STARTED .*roiFastPath=true' "$LOG" || true)"
-          HOLD_ROI_OCR_COUNT="$(grep -Ec 'M4_OCR variant=POST_DECISION_ROI ' <<< "$DELTA" || true)"
           [[ "$LOST_AFTER" -ge 1 && -n "$TARGET_LOSS_SEEN_MS" ]] || {
             {
               echo 'classification=FAIL_NO_TARGET_LOSS_AFTER_CARD_REMOVAL'
               echo "post_decision_roi_fast_path_count=$ROI_FAST_PATH"
+              echo "post_decision_visual_fast_path_count=$VISUAL_FAST_PATH"
+              echo "hold_visual_present_count=$VISUAL_PRESENT_COUNT"
+              echo "hold_visual_pending_count=$VISUAL_PENDING_DURING_HOLD"
               echo "hold_roi_ocr_count=$HOLD_ROI_OCR_COUNT"
               echo "removal_screenshot_count=$REMOVAL_SCREENSHOT_COUNT"
+              echo "removal_visual_count=$REMOVAL_VISUAL_COUNT"
+              echo "removal_visual_pending_count=$REMOVAL_VISUAL_PENDING_COUNT"
+              echo "removal_visual_lost_count=$REMOVAL_VISUAL_LOST_COUNT"
               echo "removal_roi_ocr_count=$REMOVAL_ROI_OCR_COUNT"
               echo "removal_result_count=$REMOVAL_RESULT_COUNT"
               echo "removal_complete_count=$REMOVAL_COMPLETE_COUNT"
@@ -239,12 +256,26 @@ jobs:
             exit 66
           }
           TARGET_LOSS_LATENCY_MS=$(( TARGET_LOSS_SEEN_MS - REMOVAL_START_MS ))
+          [[ "$VISUAL_LOST_AFTER" -ge 1 && "$REMOVAL_VISUAL_LOST_COUNT" -ge 1 ]] || {
+            {
+              echo 'classification=FAIL_TARGET_LOSS_NOT_VISUAL'
+              echo "target_loss_latency_ms=$TARGET_LOSS_LATENCY_MS"
+              echo "removal_visual_count=$REMOVAL_VISUAL_COUNT"
+              echo "removal_visual_pending_count=$REMOVAL_VISUAL_PENDING_COUNT"
+              echo "removal_visual_lost_count=$REMOVAL_VISUAL_LOST_COUNT"
+              echo "removal_roi_ocr_count=$REMOVAL_ROI_OCR_COUNT"
+            } > "$EVIDENCE_DIR/result.txt"
+            exit 75
+          }
           [[ "$TARGET_LOSS_LATENCY_MS" -le 2500 ]] || {
             {
               echo 'classification=FAIL_TARGET_LOSS_LATENCY'
               echo "target_loss_latency_ms=$TARGET_LOSS_LATENCY_MS"
               echo 'target_loss_latency_limit_ms=2500'
               echo "post_decision_roi_fast_path_count=$ROI_FAST_PATH"
+              echo "post_decision_visual_fast_path_count=$VISUAL_FAST_PATH"
+              echo "hold_visual_present_count=$VISUAL_PRESENT_COUNT"
+              echo "hold_visual_pending_count=$VISUAL_PENDING_DURING_HOLD"
               echo "hold_roi_ocr_count=$HOLD_ROI_OCR_COUNT"
               echo "removal_screenshot_count=$REMOVAL_SCREENSHOT_COUNT"
               echo "removal_roi_ocr_count=$REMOVAL_ROI_OCR_COUNT"
@@ -282,14 +313,19 @@ jobs:
           }
 
           ROI_OCR_COUNT="$(grep -Ec 'M4_OCR variant=POST_DECISION_ROI ' "$LOG" || true)"
-          [[ "$ROI_FAST_PATH" -ge 1 && "$ROI_OCR_COUNT" -ge 1 ]] || {
-            echo 'classification=FAIL_POST_DECISION_ROI_FAST_PATH_NOT_EXERCISED' > "$EVIDENCE_DIR/result.txt"
+          VISUAL_FRAME_COUNT="$(grep -Ec 'M4_POST_DECISION_VISUAL ' "$LOG" || true)"
+          [[ "$ROI_FAST_PATH" -ge 1 && "$VISUAL_FAST_PATH" -ge 1 && "$VISUAL_FRAME_COUNT" -ge 3 ]] || {
+            echo 'classification=FAIL_POST_DECISION_VISUAL_FAST_PATH_NOT_EXERCISED' > "$EVIDENCE_DIR/result.txt"
             exit 70
+          }
+          [[ "$ROI_OCR_COUNT" == 0 ]] || {
+            echo 'classification=FAIL_POST_DECISION_OCR_STILL_ON_PRIMARY_PATH' > "$EVIDENCE_DIR/result.txt"
+            exit 76
           }
           "$RUNNER_TEMP/health.sh" post_hold
 
           cat > "$EVIDENCE_DIR/result.txt" <<EOF
-          classification=PASS_F2_24_179_POST_DECISION_LATENCY
+          classification=PASS_F2_24_180_VISUAL_CLOSE_LATENCY
           environment=API36_4VCPU_CLEAN
           partial_post_decision_frames=$PARTIAL_COUNT
           spatial_fallback_on_normal_5of5_path=0
@@ -298,7 +334,14 @@ jobs:
           runtime_empty_during_hold=0
           overlay_stable_during_hold=true
           post_decision_roi_fast_path=true
+          post_decision_visual_fast_path=true
+          hold_visual_present_count=$VISUAL_PRESENT_COUNT
+          hold_visual_pending_count=$VISUAL_PENDING_DURING_HOLD
           post_decision_roi_ocr_count=$ROI_OCR_COUNT
+          removal_visual_count=$REMOVAL_VISUAL_COUNT
+          removal_visual_pending_count=$REMOVAL_VISUAL_PENDING_COUNT
+          removal_visual_lost_count=$REMOVAL_VISUAL_LOST_COUNT
+          target_loss_method=ROI_VISUAL
           target_loss_after_real_removal=true
           target_loss_latency_ms=$TARGET_LOSS_LATENCY_MS
           target_loss_latency_limit_ms=2500
@@ -320,7 +363,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: f2-24-179-runtime-sanitized
+          name: f2-24-180-runtime-sanitized
           path: evidence/**
           if-no-files-found: error
           retention-days: 7
