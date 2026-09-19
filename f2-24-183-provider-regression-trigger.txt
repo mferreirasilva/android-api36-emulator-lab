@@ -1,4 +1,3 @@
-F2-24-185 99 physical-fail regression
-source=5c8baa78acbe1219accae06136d2d8c90cb58601
-private_run=35467828071
-private_artifact=10591584040
+F2-24-186 provider continuity regression
+private_artifact=10591847233
+source=a466eabfd65ac7a30b80a072cfcec0b130161ac8
