@@ -216,13 +216,42 @@ jobs:
           collect
           REMOVAL="$(tail -n "+$REMOVAL_LINE" "$LOG")"
           LOST_AFTER="$(grep -Ec 'M4_TARGET_LOST ' <<< "$REMOVAL" || true)"
-          [[ "$LOST_AFTER" -ge 1 && -n "$TARGET_LOSS_SEEN_MS" ]] || { echo 'classification=FAIL_NO_TARGET_LOSS_AFTER_CARD_REMOVAL' > "$EVIDENCE_DIR/result.txt"; exit 66; }
+          REMOVAL_SCREENSHOT_COUNT="$(grep -Ec 'SCREENSHOT_SUCCESS ' <<< "$REMOVAL" || true)"
+          REMOVAL_ROI_OCR_COUNT="$(grep -Ec 'M4_OCR variant=POST_DECISION_ROI ' <<< "$REMOVAL" || true)"
+          REMOVAL_RESULT_COUNT="$(grep -Ec 'M4_RESULT .*postDecisionMonitoring=true' <<< "$REMOVAL" || true)"
+          REMOVAL_COMPLETE_COUNT="$(grep -Ec 'M4_RESULT .*OCR_5OF5=true .*postDecisionMonitoring=true' <<< "$REMOVAL" || true)"
+          REMOVAL_PARTIAL_COUNT="$(grep -Ec 'M4_RESULT .*OCR_5OF5=false .*postDecisionMonitoring=true' <<< "$REMOVAL" || true)"
+          REMOVAL_ROI_FALLBACK_COUNT="$(grep -Ec 'M4_POST_DECISION_ROI_FALLBACK ' <<< "$REMOVAL" || true)"
+          ROI_FAST_PATH="$(grep -Ec 'M4_POST_DECISION_WATCH_STARTED .*roiFastPath=true' "$LOG" || true)"
+          HOLD_ROI_OCR_COUNT="$(grep -Ec 'M4_OCR variant=POST_DECISION_ROI ' <<< "$DELTA" || true)"
+          [[ "$LOST_AFTER" -ge 1 && -n "$TARGET_LOSS_SEEN_MS" ]] || {
+            {
+              echo 'classification=FAIL_NO_TARGET_LOSS_AFTER_CARD_REMOVAL'
+              echo "post_decision_roi_fast_path_count=$ROI_FAST_PATH"
+              echo "hold_roi_ocr_count=$HOLD_ROI_OCR_COUNT"
+              echo "removal_screenshot_count=$REMOVAL_SCREENSHOT_COUNT"
+              echo "removal_roi_ocr_count=$REMOVAL_ROI_OCR_COUNT"
+              echo "removal_result_count=$REMOVAL_RESULT_COUNT"
+              echo "removal_complete_count=$REMOVAL_COMPLETE_COUNT"
+              echo "removal_partial_count=$REMOVAL_PARTIAL_COUNT"
+              echo "removal_roi_fallback_count=$REMOVAL_ROI_FALLBACK_COUNT"
+            } > "$EVIDENCE_DIR/result.txt"
+            exit 66
+          }
           TARGET_LOSS_LATENCY_MS=$(( TARGET_LOSS_SEEN_MS - REMOVAL_START_MS ))
           [[ "$TARGET_LOSS_LATENCY_MS" -le 2500 ]] || {
             {
               echo 'classification=FAIL_TARGET_LOSS_LATENCY'
               echo "target_loss_latency_ms=$TARGET_LOSS_LATENCY_MS"
               echo 'target_loss_latency_limit_ms=2500'
+              echo "post_decision_roi_fast_path_count=$ROI_FAST_PATH"
+              echo "hold_roi_ocr_count=$HOLD_ROI_OCR_COUNT"
+              echo "removal_screenshot_count=$REMOVAL_SCREENSHOT_COUNT"
+              echo "removal_roi_ocr_count=$REMOVAL_ROI_OCR_COUNT"
+              echo "removal_result_count=$REMOVAL_RESULT_COUNT"
+              echo "removal_complete_count=$REMOVAL_COMPLETE_COUNT"
+              echo "removal_partial_count=$REMOVAL_PARTIAL_COUNT"
+              echo "removal_roi_fallback_count=$REMOVAL_ROI_FALLBACK_COUNT"
             } > "$EVIDENCE_DIR/result.txt"
             exit 68
           }
@@ -252,7 +281,6 @@ jobs:
             exit 69
           }
 
-          ROI_FAST_PATH="$(grep -Ec 'M4_POST_DECISION_WATCH_STARTED .*roiFastPath=true' "$LOG" || true)"
           ROI_OCR_COUNT="$(grep -Ec 'M4_OCR variant=POST_DECISION_ROI ' "$LOG" || true)"
           [[ "$ROI_FAST_PATH" -ge 1 && "$ROI_OCR_COUNT" -ge 1 ]] || {
             echo 'classification=FAIL_POST_DECISION_ROI_FAST_PATH_NOT_EXERCISED' > "$EVIDENCE_DIR/result.txt"
