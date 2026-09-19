@@ -210,7 +210,8 @@ jobs:
 
           REMOVAL_LINE=$(( $(wc -l < "$LOG") + 1 ))
           REMOVAL_START_MS="$(date +%s%3N)"
-          adb -s "$EMULATOR_SERIAL" shell am force-stop "$HELPER_PACKAGE"
+          adb -s "$EMULATOR_SERIAL" shell am start -W -n "$HELPER_PACKAGE/$HELPER_ACTIVITY" --es mode blank >/dev/null
+          wait_re 'QA_F2_24_180_OFFER_REMOVED appForeground=true cardVisible=false' 10
 
           TARGET_LOSS_SEEN_MS=""
           for _ in $(seq 1 80); do
