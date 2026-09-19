@@ -1,4 +1,4 @@
-name: F2-24-183 Uber+99 Provider Regression
+name: F2-24-185 99 Physical Fail Regression
 
 on:
   push:
@@ -9,17 +9,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: f2-24-183-provider-regression
+  group: f2-24-185-provider-regression
   cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: mferreirasilva/AppMotora
-  PRIVATE_ARTIFACT_NAME: f2-24-183-provider-regression-bundle
-  EXPECTED_SOURCE_SHA: 637da3b98d5eb22966ada3906205414ec9e351cf
+  PRIVATE_ARTIFACT_NAME: f2-24-185-provider-regression-bundle
+  EXPECTED_SOURCE_SHA: 5c8baa78acbe1219accae06136d2d8c90cb58601
   EXPECTED_TEST_99: br.com.appmotora.NinetyNineProviderRuntimeInstrumentedTest
   EXPECTED_TEST_UBER: br.com.appmotora.UberOfferSpatialRuntimeFallbackInstrumentedTest
   EXPECTED_TEST_RUNNER: androidx.test.runner.AndroidJUnitRunner
-  AVD_NAME: f2-24-183-api36
+  AVD_NAME: f2-24-185-api36
   EMULATOR_SERIAL: emulator-5554
   EVIDENCE_DIR: evidence
 
@@ -172,9 +172,9 @@ jobs:
           STATUS=$?
           set -e
           "$RUNNER_TEMP/health.sh" post_99
-          if [[ $STATUS -eq 0 ]] && grep -Fq 'OK (2 tests)' "$RAW" && ! grep -Fq 'FAILURES!!!' "$RAW"; then
+          if [[ $STATUS -eq 0 ]] && grep -Fq 'OK (3 tests)' "$RAW" && ! grep -Fq 'FAILURES!!!' "$RAW"; then
             echo 'ninety_nine_ocr_parser_runtime=PASS' > "$EVIDENCE_DIR/99-result.txt"
-            echo 'ninety_nine_tests=2/2' >> "$EVIDENCE_DIR/99-result.txt"
+            echo 'ninety_nine_tests=3/3' >> "$EVIDENCE_DIR/99-result.txt"
           else
             echo 'classification=FAIL_F2_24_183_NINETY_NINE' > "$EVIDENCE_DIR/result.txt"
             exit 52
@@ -205,11 +205,11 @@ jobs:
           grep -Fq 'ninety_nine_ocr_parser_runtime=PASS' "$EVIDENCE_DIR/99-result.txt"
           grep -Fq 'uber_spatial_regression=PASS' "$EVIDENCE_DIR/uber-result.txt"
           cat > "$EVIDENCE_DIR/result.txt" <<EOF
-          classification=PASS_F2_24_183_PROVIDER_REGRESSION
+          classification=PASS_F2_24_185_99_PHYSICAL_FAIL_REGRESSION
           environment=API36_4VCPU_CLEAN
           source_sha=$EXPECTED_SOURCE_SHA
           ninety_nine_ocr_parser_runtime=PASS
-          ninety_nine_tests=2/2
+          ninety_nine_tests=3/3
           uber_spatial_regression=PASS
           uber_tests=2/2
           raw_ocr_persisted=false
@@ -230,7 +230,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: f2-24-183-provider-regression-sanitized
+          name: f2-24-185-provider-regression-sanitized
           path: evidence/**
           if-no-files-found: error
           retention-days: 7
