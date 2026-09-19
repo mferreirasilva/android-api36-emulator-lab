@@ -1,4 +1,4 @@
-name: F2-24-189 Provider Continuity Regression
+name: F2-24-192 Provider Continuity Regression
 
 on:
   push:
@@ -9,17 +9,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: f2-24-189-provider-regression
+  group: f2-24-192-provider-regression
   cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: mferreirasilva/AppMotora
-  PRIVATE_ARTIFACT_NAME: f2-24-189-provider-regression-bundle
-  EXPECTED_SOURCE_SHA: a7908c99b9c4e1c8cefa8a4e74ad3ef68d981c89
+  PRIVATE_ARTIFACT_NAME: f2-24-192-provider-regression-bundle
+  EXPECTED_SOURCE_SHA: 7c39ab5e969d5d62355a20586c460a2cbe7002aa
   EXPECTED_TEST_99: br.com.appmotora.NinetyNineProviderRuntimeInstrumentedTest
   EXPECTED_TEST_UBER: br.com.appmotora.UberOfferSpatialRuntimeFallbackInstrumentedTest
   EXPECTED_TEST_RUNNER: androidx.test.runner.AndroidJUnitRunner
-  AVD_NAME: f2-24-189-api36
+  AVD_NAME: f2-24-192-api36
   EMULATOR_SERIAL: emulator-5554
   EVIDENCE_DIR: evidence
 
@@ -45,9 +45,9 @@ jobs:
           (( $(nproc) >= 4 )) || { echo 'classification=FAIL_ENVIRONMENT_HOST_LT_4_VCPU' > "$EVIDENCE_DIR/result.txt"; exit 40; }
           [[ -n "${PRIVATE_TOKEN:-}" ]] || { echo 'classification=BLOCKED_PRIVATE_ARTIFACT_TOKEN' > "$EVIDENCE_DIR/result.txt"; exit 78; }
 
-          PRIVATE_DIR="$RUNNER_TEMP/f2-24-189-private"
-          JSON="$RUNNER_TEMP/f2-24-189-artifacts.json"
-          ZIP="$RUNNER_TEMP/f2-24-189.zip"
+          PRIVATE_DIR="$RUNNER_TEMP/f2-24-192-private"
+          JSON="$RUNNER_TEMP/f2-24-192-artifacts.json"
+          ZIP="$RUNNER_TEMP/f2-24-192.zip"
           rm -rf "$PRIVATE_DIR" "$JSON" "$ZIP"; mkdir -p "$PRIVATE_DIR"
           API="https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/artifacts"
           curl --fail --silent --show-error             -H 'Accept: application/vnd.github+json'             -H "Authorization: Bearer $PRIVATE_TOKEN"             -H 'X-GitHub-Api-Version: 2022-11-28'             "$API?name=$PRIVATE_ARTIFACT_NAME&per_page=20" -o "$JSON"
@@ -225,7 +225,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "${PRIVATE_DIR:-$RUNNER_TEMP/f2-24-189-private}" "$RUNNER_TEMP/f2-24-189.zip" "$RUNNER_TEMP/f2-24-189-artifacts.json"
+          rm -rf "${PRIVATE_DIR:-$RUNNER_TEMP/f2-24-192-private}" "$RUNNER_TEMP/f2-24-192.zip" "$RUNNER_TEMP/f2-24-192-artifacts.json"
           rm -f "$RUNNER_TEMP/instrumentation-99.txt" "$RUNNER_TEMP/instrumentation-uber.txt"
           ! find "$EVIDENCE_DIR" -type f \( -name '*.apk' -o -name '*.png' -o -name '*.jpg' -o -name '*.webp' \) | grep -q .
 
@@ -233,7 +233,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: f2-24-189-provider-regression-sanitized
+          name: f2-24-192-provider-regression-sanitized
           path: evidence/**
           if-no-files-found: error
           retention-days: 7
