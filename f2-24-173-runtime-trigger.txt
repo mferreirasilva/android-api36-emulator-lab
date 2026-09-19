@@ -1,4 +1,3 @@
-F2-24-179 diagnostic post-removal counters
-source=f584cbd50ea3a3850480348b09551420c1a5530d
-private_run=35413023806
-failed_latency_run=35413362745
+F2-24-180 visual close latency gate
+source=367b4c4f9974f3dcc6406722c3ca66d8c832d091
+private_run=35414470276
