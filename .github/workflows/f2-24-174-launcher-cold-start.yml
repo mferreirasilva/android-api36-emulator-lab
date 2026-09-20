@@ -1,4 +1,4 @@
-name: F2-24-194 Launcher Cold Start Gate
+name: F2-24-196 Launcher Cold Start Gate
 
 on:
   push:
@@ -9,15 +9,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: f2-24-194-launcher-cold-start
+  group: f2-24-196-launcher-cold-start
   cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: mferreirasilva/AppMotora
-  PRIVATE_ARTIFACT_NAME: f2-24-194-launcher-bundle
+  PRIVATE_ARTIFACT_NAME: f2-24-196-launcher-bundle
   APP_PACKAGE: br.com.appmotora.dev
   MAIN_ACTIVITY: br.com.appmotora.MainActivity
-  AVD_NAME: f2-24-194-api36
+  AVD_NAME: f2-24-196-api36
   EMULATOR_SERIAL: emulator-5554
   EVIDENCE_DIR: evidence
 
@@ -256,7 +256,7 @@ jobs:
           "$RUNNER_TEMP/f2-24-174-health.sh" post_launcher
 
           cat > "$EVIDENCE_DIR/result.txt" <<EOF
-          classification=PASS_F2_24_194_LAUNCHER_COLD_START
+          classification=PASS_F2_24_196_LAUNCHER_COLD_START
           environment=API36_4VCPU_CLEAN
           process_alive=true
           main_activity_foreground=true
@@ -282,7 +282,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: f2-24-194-launcher-sanitized
+          name: f2-24-196-launcher-sanitized
           path: evidence/**
           if-no-files-found: error
           retention-days: 7
@@ -293,7 +293,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo '### F2-24-194 launcher cold-start gate'
+            echo '### F2-24-196 launcher cold-start gate'
             echo ''
             sed 's/^/- /' "$EVIDENCE_DIR/result.txt" 2>/dev/null || true
             echo '- Private APK/UI dump/install output removed before public evidence upload.'
