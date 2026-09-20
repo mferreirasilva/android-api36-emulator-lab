@@ -1,4 +1,3 @@
-F2-24-194 99 derived-overlay self-read regression
-private_artifact=10596351106
-source=e6c8c1b3fe7a3bbf505d7b9889be8b93d71f9c55
-evidence_relabel=1
+F2-24-196 foreground target-only isolation regression
+private_artifact=10611500183
+source=b96fc3e702f5c6703f726121cd0a4b5dc8761cc3
