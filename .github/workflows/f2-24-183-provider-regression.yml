@@ -178,7 +178,7 @@ jobs:
             echo 'ninety_nine_ocr_parser_runtime=PASS' > "$EVIDENCE_DIR/99-result.txt"
             echo 'ninety_nine_tests=3/3' >> "$EVIDENCE_DIR/99-result.txt"
           else
-            echo 'classification=FAIL_F2_24_192_NINETY_NINE' > "$EVIDENCE_DIR/result.txt"
+            echo 'classification=FAIL_F2_24_194_NINETY_NINE' > "$EVIDENCE_DIR/result.txt"
             exit 52
           fi
 
@@ -196,7 +196,7 @@ jobs:
             echo 'uber_spatial_regression=PASS' > "$EVIDENCE_DIR/uber-result.txt"
             echo 'uber_tests=2/2' >> "$EVIDENCE_DIR/uber-result.txt"
           else
-            echo 'classification=FAIL_F2_24_192_UBER_REGRESSION' > "$EVIDENCE_DIR/result.txt"
+            echo 'classification=FAIL_F2_24_194_UBER_REGRESSION' > "$EVIDENCE_DIR/result.txt"
             exit 53
           fi
 
@@ -207,7 +207,7 @@ jobs:
           grep -Fq 'ninety_nine_ocr_parser_runtime=PASS' "$EVIDENCE_DIR/99-result.txt"
           grep -Fq 'uber_spatial_regression=PASS' "$EVIDENCE_DIR/uber-result.txt"
           cat > "$EVIDENCE_DIR/result.txt" <<EOF
-          classification=PASS_F2_24_192_PROVIDER_CONTINUITY_REGRESSION
+          classification=PASS_F2_24_194_PROVIDER_CONTINUITY_REGRESSION
           environment=API36_4VCPU_CLEAN
           source_sha=$EXPECTED_SOURCE_SHA
           provider_continuity_policy=PASS
