@@ -1,3 +1,3 @@
-F2-24-192 99 baseline OCR handoff regression
-private_artifact=10594730789
-source=7c39ab5e969d5d62355a20586c460a2cbe7002aa
+F2-24-194 99 derived-overlay self-read regression
+private_artifact=10596351106
+source=e6c8c1b3fe7a3bbf505d7b9889be8b93d71f9c55
