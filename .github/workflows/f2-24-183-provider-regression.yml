@@ -178,7 +178,7 @@ jobs:
             echo 'ninety_nine_ocr_parser_runtime=PASS' > "$EVIDENCE_DIR/99-result.txt"
             echo 'ninety_nine_tests=3/3' >> "$EVIDENCE_DIR/99-result.txt"
           else
-            echo 'classification=FAIL_F2_24_194_NINETY_NINE' > "$EVIDENCE_DIR/result.txt"
+            echo 'classification=FAIL_F2_24_198_NINETY_NINE' > "$EVIDENCE_DIR/result.txt"
             exit 52
           fi
 
@@ -196,7 +196,7 @@ jobs:
             echo 'uber_spatial_regression=PASS' > "$EVIDENCE_DIR/uber-result.txt"
             echo 'uber_tests=2/2' >> "$EVIDENCE_DIR/uber-result.txt"
           else
-            echo 'classification=FAIL_F2_24_194_UBER_REGRESSION' > "$EVIDENCE_DIR/result.txt"
+            echo 'classification=FAIL_F2_24_198_UBER_REGRESSION' > "$EVIDENCE_DIR/result.txt"
             exit 53
           fi
 
