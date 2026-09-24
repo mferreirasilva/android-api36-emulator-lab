@@ -1,3 +1,3 @@
-F2-24-213 provider continuity
+F2-24-213 provider continuity after Uber 3-test contract alignment
 source=40ea3cc4b207072d6b1c0a5457ae28a048b18eb9
 artifact=10804311675
