@@ -192,9 +192,9 @@ jobs:
           STATUS=$?
           set -e
           "$RUNNER_TEMP/health.sh" post_uber
-          if [[ $STATUS -eq 0 ]] && grep -Fq 'OK (2 tests)' "$RAW" && ! grep -Fq 'FAILURES!!!' "$RAW"; then
+          if [[ $STATUS -eq 0 ]] && grep -Fq 'OK (3 tests)' "$RAW" && ! grep -Fq 'FAILURES!!!' "$RAW"; then
             echo 'uber_spatial_regression=PASS' > "$EVIDENCE_DIR/uber-result.txt"
-            echo 'uber_tests=2/2' >> "$EVIDENCE_DIR/uber-result.txt"
+            echo 'uber_tests=3/3' >> "$EVIDENCE_DIR/uber-result.txt"
           else
             echo 'classification=FAIL_F2_24_213_UBER_REGRESSION' > "$EVIDENCE_DIR/result.txt"
             exit 53
@@ -214,7 +214,7 @@ jobs:
           ninety_nine_ocr_parser_runtime=PASS
           ninety_nine_tests=3/3
           uber_spatial_regression=PASS
-          uber_tests=2/2
+          uber_tests=3/3
           raw_ocr_persisted=false
           screenshots_persisted=false
           private_apk_published=false
