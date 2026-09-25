@@ -1,4 +1,4 @@
-name: F2-24-213 Provider Continuity Regression
+name: F2-24-215 Provider Continuity Regression
 
 on:
   push:
@@ -9,17 +9,17 @@ permissions:
   contents: read
 
 concurrency:
-  group: f2-24-213-provider-regression
+  group: f2-24-215-provider-regression
   cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: mferreirasilva/AppMotora
-  PRIVATE_ARTIFACT_NAME: f2-24-213-provider-regression-bundle
-  EXPECTED_SOURCE_SHA: 40ea3cc4b207072d6b1c0a5457ae28a048b18eb9
+  PRIVATE_ARTIFACT_NAME: f2-24-215-provider-regression-bundle
+  EXPECTED_SOURCE_SHA: 2b0de19bdae324972cfd5f3896e529242234542f
   EXPECTED_TEST_99: br.com.appmotora.NinetyNineProviderRuntimeInstrumentedTest
   EXPECTED_TEST_UBER: br.com.appmotora.UberOfferSpatialRuntimeFallbackInstrumentedTest
   EXPECTED_TEST_RUNNER: androidx.test.runner.AndroidJUnitRunner
-  AVD_NAME: f2-24-213-api36
+  AVD_NAME: f2-24-215-api36
   EMULATOR_SERIAL: emulator-5554
   EVIDENCE_DIR: evidence
 
@@ -45,9 +45,9 @@ jobs:
           (( $(nproc) >= 4 )) || { echo 'classification=FAIL_ENVIRONMENT_HOST_LT_4_VCPU' > "$EVIDENCE_DIR/result.txt"; exit 40; }
           [[ -n "${PRIVATE_TOKEN:-}" ]] || { echo 'classification=BLOCKED_PRIVATE_ARTIFACT_TOKEN' > "$EVIDENCE_DIR/result.txt"; exit 78; }
 
-          PRIVATE_DIR="$RUNNER_TEMP/f2-24-213-private"
-          JSON="$RUNNER_TEMP/f2-24-213-artifacts.json"
-          ZIP="$RUNNER_TEMP/f2-24-213.zip"
+          PRIVATE_DIR="$RUNNER_TEMP/f2-24-215-private"
+          JSON="$RUNNER_TEMP/f2-24-215-artifacts.json"
+          ZIP="$RUNNER_TEMP/f2-24-215.zip"
           rm -rf "$PRIVATE_DIR" "$JSON" "$ZIP"; mkdir -p "$PRIVATE_DIR"
           API="https://api.github.com/repos/$PRIVATE_REPOSITORY/actions/artifacts"
           curl --fail --silent --show-error             -H 'Accept: application/vnd.github+json'             -H "Authorization: Bearer $PRIVATE_TOKEN"             -H 'X-GitHub-Api-Version: 2022-11-28'             "$API?name=$PRIVATE_ARTIFACT_NAME&per_page=20" -o "$JSON"
@@ -72,6 +72,11 @@ jobs:
           [[ "$TEST_UBER" == "$EXPECTED_TEST_UBER" ]]
           [[ "$TEST_RUNNER" == "$EXPECTED_TEST_RUNNER" ]]
           [[ "$PROVIDER_CONTINUITY_POLICY" == "foreground_target_only_fail_closed" ]]
+          [[ "$FOREGROUND_ISOLATION_GUARD" == "PASS" ]]
+          [[ "$SELF_WINDOW_GUARD" == "PASS" ]]
+          [[ "$DERIVED_OVERLAY_GUARD" == "PASS" ]]
+          [[ "$CROSS_PROVIDER_RECENT_PACKAGE_GUARD" == "PASS" ]]
+          [[ "$NINETY_NINE_FRESH_OCR_GUARD" == "PASS" ]]
           {
             echo "private_artifact_id=$ID"
             echo "bundle_integrity=PASS"
@@ -174,11 +179,11 @@ jobs:
           STATUS=$?
           set -e
           "$RUNNER_TEMP/health.sh" post_99
-          if [[ $STATUS -eq 0 ]] && grep -Fq 'OK (3 tests)' "$RAW" && ! grep -Fq 'FAILURES!!!' "$RAW"; then
+          if [[ $STATUS -eq 0 ]] && grep -Fq 'OK (4 tests)' "$RAW" && ! grep -Fq 'FAILURES!!!' "$RAW"; then
             echo 'ninety_nine_ocr_parser_runtime=PASS' > "$EVIDENCE_DIR/99-result.txt"
-            echo 'ninety_nine_tests=3/3' >> "$EVIDENCE_DIR/99-result.txt"
+            echo 'ninety_nine_tests=4/4' >> "$EVIDENCE_DIR/99-result.txt"
           else
-            echo 'classification=FAIL_F2_24_213_NINETY_NINE' > "$EVIDENCE_DIR/result.txt"
+            echo 'classification=FAIL_F2_24_215_NINETY_NINE' > "$EVIDENCE_DIR/result.txt"
             exit 52
           fi
 
@@ -196,7 +201,7 @@ jobs:
             echo 'uber_spatial_regression=PASS' > "$EVIDENCE_DIR/uber-result.txt"
             echo 'uber_tests=3/3' >> "$EVIDENCE_DIR/uber-result.txt"
           else
-            echo 'classification=FAIL_F2_24_213_UBER_REGRESSION' > "$EVIDENCE_DIR/result.txt"
+            echo 'classification=FAIL_F2_24_215_UBER_REGRESSION' > "$EVIDENCE_DIR/result.txt"
             exit 53
           fi
 
@@ -207,12 +212,17 @@ jobs:
           grep -Fq 'ninety_nine_ocr_parser_runtime=PASS' "$EVIDENCE_DIR/99-result.txt"
           grep -Fq 'uber_spatial_regression=PASS' "$EVIDENCE_DIR/uber-result.txt"
           cat > "$EVIDENCE_DIR/result.txt" <<EOF
-          classification=PASS_F2_24_213_PROVIDER_CONTINUITY_REGRESSION
+          classification=PASS_F2_24_215_PROVIDER_CONTINUITY_REGRESSION
           environment=API36_4VCPU_CLEAN
           source_sha=$EXPECTED_SOURCE_SHA
           provider_continuity_policy=PASS
+          foreground_isolation_guard=PASS
+          self_window_guard=PASS
+          derived_overlay_guard=PASS
+          cross_provider_recent_package_guard=PASS
+          ninety_nine_fresh_ocr_guard=PASS
           ninety_nine_ocr_parser_runtime=PASS
-          ninety_nine_tests=3/3
+          ninety_nine_tests=4/4
           uber_spatial_regression=PASS
           uber_tests=3/3
           raw_ocr_persisted=false
@@ -225,7 +235,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "${PRIVATE_DIR:-$RUNNER_TEMP/f2-24-213-private}" "$RUNNER_TEMP/f2-24-213.zip" "$RUNNER_TEMP/f2-24-213-artifacts.json"
+          rm -rf "${PRIVATE_DIR:-$RUNNER_TEMP/f2-24-215-private}" "$RUNNER_TEMP/f2-24-215.zip" "$RUNNER_TEMP/f2-24-215-artifacts.json"
           rm -f "$RUNNER_TEMP/instrumentation-99.txt" "$RUNNER_TEMP/instrumentation-uber.txt"
           ! find "$EVIDENCE_DIR" -type f \( -name '*.apk' -o -name '*.png' -o -name '*.jpg' -o -name '*.webp' \) | grep -q .
 
@@ -233,7 +243,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: f2-24-213-provider-regression-sanitized
+          name: f2-24-215-provider-regression-sanitized
           path: evidence/**
           if-no-files-found: error
           retention-days: 7
