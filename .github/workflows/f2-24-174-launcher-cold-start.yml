@@ -1,4 +1,4 @@
-name: F2-24-215 Launcher Cold Start Gate
+name: F2-24-220 Launcher Cold Start Gate
 
 on:
   push:
@@ -9,15 +9,15 @@ permissions:
   contents: read
 
 concurrency:
-  group: f2-24-215-launcher-cold-start
+  group: f2-24-220-launcher-cold-start
   cancel-in-progress: false
 
 env:
   PRIVATE_REPOSITORY: mferreirasilva/AppMotora
-  PRIVATE_ARTIFACT_NAME: f2-24-215-launcher-bundle
+  PRIVATE_ARTIFACT_NAME: f2-24-220-launcher-bundle
   APP_PACKAGE: br.com.appmotora.dev
   MAIN_ACTIVITY: br.com.appmotora.MainActivity
-  AVD_NAME: f2-24-215-api36
+  AVD_NAME: f2-24-220-api36
   EMULATOR_SERIAL: emulator-5554
   EVIDENCE_DIR: evidence
 
@@ -50,9 +50,9 @@ jobs:
             exit 78
           }
 
-          PRIVATE_DIR="$RUNNER_TEMP/f2-24-215-private"
-          PRIVATE_ZIP="$RUNNER_TEMP/f2-24-215-private.zip"
-          ARTIFACTS_JSON="$RUNNER_TEMP/f2-24-215-artifacts.json"
+          PRIVATE_DIR="$RUNNER_TEMP/f2-24-220-private"
+          PRIVATE_ZIP="$RUNNER_TEMP/f2-24-220-private.zip"
+          ARTIFACTS_JSON="$RUNNER_TEMP/f2-24-220-artifacts.json"
           rm -rf "$PRIVATE_DIR" "$PRIVATE_ZIP" "$ARTIFACTS_JSON"
           mkdir -p "$PRIVATE_DIR"
 
@@ -120,11 +120,11 @@ jobs:
           fi
           sdkmanager --install emulator 'system-images;android-36;google_apis;x86_64' >/dev/null
 
-          cat > "$RUNNER_TEMP/f2-24-215-health.sh" <<'BASH'
+          cat > "$RUNNER_TEMP/f2-24-220-health.sh" <<'BASH'
           #!/usr/bin/env bash
           set -euo pipefail
           label="${1:?checkpoint required}"
-          window="$RUNNER_TEMP/f2-24-215-window-${label}.txt"
+          window="$RUNNER_TEMP/f2-24-220-window-${label}.txt"
           timeout 65s adb -s "$EMULATOR_SERIAL" shell cmd package wait-for-handler --timeout 60000 >/dev/null 2>&1
           timeout 65s adb -s "$EMULATOR_SERIAL" shell cmd package wait-for-background-handler --timeout 60000 >/dev/null 2>&1
           timeout 15s adb -s "$EMULATOR_SERIAL" shell pm path android >/dev/null 2>&1
@@ -145,17 +145,17 @@ jobs:
             rm -f "$window"
             exit 42
           fi
-          previous="$(cat "$RUNNER_TEMP/f2-24-215-last-systemui-pid.txt" 2>/dev/null || true)"
+          previous="$(cat "$RUNNER_TEMP/f2-24-220-last-systemui-pid.txt" 2>/dev/null || true)"
           if [[ -n "$previous" && "$previous" != "$pid" ]]; then
             printf '%s=SYSTEMUI_PID_CHANGED\n' "$label" >> "$EVIDENCE_DIR/health-checkpoints.txt"
             rm -f "$window"
             exit 43
           fi
-          printf '%s' "$pid" > "$RUNNER_TEMP/f2-24-215-last-systemui-pid.txt"
+          printf '%s' "$pid" > "$RUNNER_TEMP/f2-24-220-last-systemui-pid.txt"
           printf '%s=CLEAN\n' "$label" >> "$EVIDENCE_DIR/health-checkpoints.txt"
           rm -f "$window"
           BASH
-          chmod +x "$RUNNER_TEMP/f2-24-215-health.sh"
+          chmod +x "$RUNNER_TEMP/f2-24-220-health.sh"
 
           rm -rf "$ANDROID_AVD_HOME/$AVD_NAME.avd" "$ANDROID_AVD_HOME/$AVD_NAME.ini"
           echo no | avdmanager create avd --force -n "$AVD_NAME"             --package 'system-images;android-36;google_apis;x86_64'             --device 'pixel_6' >/dev/null
@@ -167,7 +167,7 @@ jobs:
           } >> "$ANDROID_AVD_HOME/$AVD_NAME.avd/config.ini"
 
           adb start-server
-          nohup "$ANDROID_SDK_ROOT/emulator/emulator"             -port 5554 -avd "$AVD_NAME" -no-window -accel on             -gpu swiftshader_indirect -no-snapshot -noaudio -no-metrics             > "$RUNNER_TEMP/f2-24-215-emulator.log" 2>&1 &
+          nohup "$ANDROID_SDK_ROOT/emulator/emulator"             -port 5554 -avd "$AVD_NAME" -no-window -accel on             -gpu swiftshader_indirect -no-snapshot -noaudio -no-metrics             > "$RUNNER_TEMP/f2-24-220-emulator.log" 2>&1 &
 
           READY=false
           for _ in $(seq 1 120); do
@@ -201,22 +201,22 @@ jobs:
           adb -s "$EMULATOR_SERIAL" shell settings put global window_animation_scale 0.0
           adb -s "$EMULATOR_SERIAL" shell settings put global transition_animation_scale 0.0
           adb -s "$EMULATOR_SERIAL" shell settings put global animator_duration_scale 0.0
-          "$RUNNER_TEMP/f2-24-215-health.sh" boot_clean_1
+          "$RUNNER_TEMP/f2-24-220-health.sh" boot_clean_1
           sleep 5
-          "$RUNNER_TEMP/f2-24-215-health.sh" boot_clean_2
+          "$RUNNER_TEMP/f2-24-220-health.sh" boot_clean_2
 
       - name: Install official APK and cold-start real MainActivity
         shell: bash
         run: |
           set -euo pipefail
-          "$RUNNER_TEMP/f2-24-215-health.sh" pre_install
-          adb -s "$EMULATOR_SERIAL" install -r -t "$APK" > "$RUNNER_TEMP/f2-24-215-install.txt" 2>&1
-          grep -Fq 'Success' "$RUNNER_TEMP/f2-24-215-install.txt"
-          "$RUNNER_TEMP/f2-24-215-health.sh" post_install
+          "$RUNNER_TEMP/f2-24-220-health.sh" pre_install
+          adb -s "$EMULATOR_SERIAL" install -r -t "$APK" > "$RUNNER_TEMP/f2-24-220-install.txt" 2>&1
+          grep -Fq 'Success' "$RUNNER_TEMP/f2-24-220-install.txt"
+          "$RUNNER_TEMP/f2-24-220-health.sh" post_install
 
           adb -s "$EMULATOR_SERIAL" shell pm clear "$APP_PACKAGE" >/dev/null
           adb -s "$EMULATOR_SERIAL" shell am force-stop "$APP_PACKAGE"
-          START_OUT="$RUNNER_TEMP/f2-24-215-am-start.txt"
+          START_OUT="$RUNNER_TEMP/f2-24-220-am-start.txt"
           adb -s "$EMULATOR_SERIAL" shell am start -W             -n "$APP_PACKAGE/$MAIN_ACTIVITY" > "$START_OUT" 2>&1
           grep -Eq '^Status: ok$|^Status: ok\r$' "$START_OUT"
 
@@ -227,16 +227,16 @@ jobs:
             exit 51
           }
 
-          ACTIVITY="$RUNNER_TEMP/f2-24-215-activity.txt"
+          ACTIVITY="$RUNNER_TEMP/f2-24-220-activity.txt"
           adb -s "$EMULATOR_SERIAL" shell dumpsys activity activities > "$ACTIVITY"
           grep -Fq "$APP_PACKAGE/$MAIN_ACTIVITY" "$ACTIVITY" || {
             echo 'classification=FAIL_LAUNCHER_MAIN_ACTIVITY_NOT_FOREGROUND' > "$EVIDENCE_DIR/result.txt"
             exit 52
           }
 
-          adb -s "$EMULATOR_SERIAL" shell uiautomator dump /sdcard/f2-24-215-window.xml >/dev/null 2>&1
-          UI="$RUNNER_TEMP/f2-24-215-window.xml"
-          adb -s "$EMULATOR_SERIAL" pull /sdcard/f2-24-215-window.xml "$UI" >/dev/null 2>&1
+          adb -s "$EMULATOR_SERIAL" shell uiautomator dump /sdcard/f2-24-220-window.xml >/dev/null 2>&1
+          UI="$RUNNER_TEMP/f2-24-220-window.xml"
+          adb -s "$EMULATOR_SERIAL" pull /sdcard/f2-24-220-window.xml "$UI" >/dev/null 2>&1
           test -s "$UI"
 
           if grep -Fq 'Não foi possível iniciar' "$UI" ||              grep -Fq 'configuração necessária para iniciar' "$UI" ||              grep -Fq 'configuração desta instalação está inconsistente' "$UI"; then
@@ -253,10 +253,10 @@ jobs:
             exit 55
           }
 
-          "$RUNNER_TEMP/f2-24-215-health.sh" post_launcher
+          "$RUNNER_TEMP/f2-24-220-health.sh" post_launcher
 
           cat > "$EVIDENCE_DIR/result.txt" <<EOF
-          classification=PASS_F2_24_215_LAUNCHER_COLD_START
+          classification=PASS_F2_24_220_LAUNCHER_COLD_START
           environment=API36_4VCPU_CLEAN
           process_alive=true
           main_activity_foreground=true
@@ -272,17 +272,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf "${PRIVATE_DIR:-$RUNNER_TEMP/f2-24-215-private}"
-          rm -f "$RUNNER_TEMP/f2-24-215-private.zip" "$RUNNER_TEMP/f2-24-215-artifacts.json"
-          rm -f "$RUNNER_TEMP/f2-24-215-install.txt" "$RUNNER_TEMP/f2-24-215-am-start.txt"
-          rm -f "$RUNNER_TEMP/f2-24-215-activity.txt" "$RUNNER_TEMP/f2-24-215-window.xml"
+          rm -rf "${PRIVATE_DIR:-$RUNNER_TEMP/f2-24-220-private}"
+          rm -f "$RUNNER_TEMP/f2-24-220-private.zip" "$RUNNER_TEMP/f2-24-220-artifacts.json"
+          rm -f "$RUNNER_TEMP/f2-24-220-install.txt" "$RUNNER_TEMP/f2-24-220-am-start.txt"
+          rm -f "$RUNNER_TEMP/f2-24-220-activity.txt" "$RUNNER_TEMP/f2-24-220-window.xml"
           ! find "$EVIDENCE_DIR" -type f \( -name '*.apk' -o -name '*.png' -o -name '*.xml' \) | grep -q .
 
       - name: Upload sanitized launcher evidence
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: f2-24-215-launcher-sanitized
+          name: f2-24-220-launcher-sanitized
           path: evidence/**
           if-no-files-found: error
           retention-days: 7
@@ -293,7 +293,7 @@ jobs:
         shell: bash
         run: |
           {
-            echo '### F2-24-215 launcher cold-start gate'
+            echo '### F2-24-220 launcher cold-start gate'
             echo ''
             sed 's/^/- /' "$EVIDENCE_DIR/result.txt" 2>/dev/null || true
             echo '- Private APK/UI dump/install output removed before public evidence upload.'
